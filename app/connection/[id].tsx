@@ -17,7 +17,6 @@ import { useConnections } from "../../src/stores/connections"
 import { useEvents } from "../../src/stores/events"
 import type { ConnectionType } from "../../src/lib/types"
 import { probeConnection, shareReport, translatedFailureSummary } from "../../src/lib/diagnostics"
-import { captureDiagnostic } from "../../src/lib/sentry"
 import { parseUrl } from "../../src/lib/diagnostics-classify"
 import { buildAuth } from "../../src/lib/auth"
 
@@ -91,7 +90,6 @@ export default function EditConnectionScreen() {
         directory: directory.trim() || undefined,
         username: username.trim() || undefined,
       },
-      "edit_test",
       password || undefined,
     )
 
@@ -101,9 +99,8 @@ export default function EditConnectionScreen() {
       return
     }
 
-    // Failed: run active diagnostics, capture to Sentry, offer a shareable report.
+    // Failed: run active diagnostics and offer a shareable report.
     const report = await probeConnection(url.trim(), buildAuth(username, password))
-    captureDiagnostic(report)
     setIsTesting(false)
 
     Alert.alert(

@@ -1,6 +1,6 @@
 // Pure classification of HTTP auth failures, extracted so it's unit-testable
 // under plain `node --test` without pulling in expo/fetch (sdk.ts is RN-only)
-// — same pattern as analytics-classify.ts / diagnostics-classify.ts.
+// — same pattern as diagnostics-classify.ts.
 //
 // Why this exists: sdk.ts's request()/events() used to throw a generic Error
 // for every non-2xx response, so call sites (the SSE reconnect loop, screen

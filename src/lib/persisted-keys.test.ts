@@ -32,9 +32,6 @@ const ALLOWED_PERSISTED_KEYS = new Map<string, string>([
   ["AUTH_SETTINGS_KEY", "biometric/app-lock preference"],
   ["COUNT_KEY", "store-review: launch counter"],
   ["ASKED_KEY", "store-review: already-prompted flag"],
-  ["FIRST_OPEN_KEY", "analytics: first-open flag"],
-  ["CONSENT_KEY", "telemetry consent decision"],
-  ["CHATWOOT_SOURCE_KEY", "support contact id issued by Chatwoot"],
 ])
 
 const SRC = path.join(import.meta.dirname, "..")

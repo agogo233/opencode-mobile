@@ -6,10 +6,6 @@ on:
 jobs:
   build-arm64:
     runs-on: ubuntu-latest
-    env:
-      EXPO_PUBLIC_SENTRY_DSN: ${{ secrets.EXPO_PUBLIC_SENTRY_DSN }}
-      EXPO_PUBLIC_POSTHOG_KEY: ${{ secrets.EXPO_PUBLIC_POSTHOG_KEY }}
-      EXPO_PUBLIC_CHATWOOT_INBOX_IDENTIFIER: ${{ secrets.EXPO_PUBLIC_CHATWOOT_INBOX_IDENTIFIER }}
     steps:
       - uses: actions/checkout@v6
 
@@ -50,16 +46,6 @@ jobs:
 
       - name: Expo prebuild
         run: npx expo prebuild --platform android --no-install
-
-      - name: Disable Sentry source map upload
-        # This fork's cloud build has no SENTRY_* secrets (the gradle-side
-        # sentry-cli upload fails with "Project not found" when they are
-        # unset — see run 34354070526). Runtime Sentry.init() is gated on
-        # EXPO_PUBLIC_SENTRY_DSN anyway, so dropping the build-time upload
-        # loses nothing. Same strip the F-Droid job applies. MUST run AFTER
-        # prebuild: the @sentry/react-native/expo config plugin re-adds the
-        # apply line each prebuild.
-        run: sed -i '/apply from.*sentry.gradle/d' android/app/build.gradle
 
       - name: Setup signing
         run: |

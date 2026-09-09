@@ -17,16 +17,14 @@ import { useTranslation } from "react-i18next"
 import { useConnections } from "../../src/stores/connections"
 import type { ConnectionType } from "../../src/lib/types"
 import { probeConnection, shareReport, translatedFailureSummary } from "../../src/lib/diagnostics"
-import { captureDiagnostic } from "../../src/lib/sentry"
 import { parseUrl } from "../../src/lib/diagnostics-classify"
 import { buildAuth } from "../../src/lib/auth"
-import { AnalyticsEvent, track } from "../../src/lib/analytics"
 import { submitWaitlistSignup, buildWaitlistMailtoUrl, needsManualEscapeHatch, type QueuedSignup } from "../../src/lib/waitlist"
 import { flushPendingSignups, queuePendingSignup, readPendingSignups, dropPendingSignup } from "../../src/lib/waitlist-queue-storage"
 import appJson from "../../app.json"
 
-// Same read as sentry.ts: app.json is the single source of the user-visible
-// version (package.json/gradle are kept in parity by `npm run check:versions`).
+// app.json is the single source of the user-visible version (package.json/gradle
+// are kept in parity by `npm run check:versions`).
 const APP_VERSION = (appJson as { expo?: { version?: string } }).expo?.version ?? "unknown"
 
 export default function AddConnectionScreen() {
@@ -106,7 +104,6 @@ export default function AddConnectionScreen() {
       return
     }
 
-    track(AnalyticsEvent.ConnectionFormSubmitted, { mode: "quick" })
     setIsConnecting(true)
 
     // Test connection first. Quick Connect has no username field, so the
@@ -121,7 +118,6 @@ export default function AddConnectionScreen() {
         type: "local",
         url: serverUrl,
       },
-      "onboarding",
       password || undefined,
     )
 
@@ -146,9 +142,8 @@ export default function AddConnectionScreen() {
         )
       }
     } else {
-      // Failed: run active diagnostics, capture to Sentry, offer a shareable report.
+      // Failed: run active diagnostics and offer a shareable report.
       const report = await probeConnection(serverUrl, buildAuth(undefined, password))
-      captureDiagnostic(report)
       setIsConnecting(false)
       Alert.alert(
         t("connection.shared.alerts.connectionFailedTitle"),
@@ -179,14 +174,12 @@ export default function AddConnectionScreen() {
       return
     }
 
-    track(AnalyticsEvent.ConnectionFormSubmitted, { mode: "advanced" })
     setIsConnecting(true)
 
     // Pre-flight, mirroring Quick Connect: previously Advanced mode saved
     // directly with no health check, so bad credentials (401/403) or an
     // unreachable server silently became the active connection with zero
-    // feedback (issue #76). testConnection() also fires the
-    // connection_attempted/succeeded/failed analytics events.
+    // feedback (issue #76).
     const result = await testConnection(
       {
         id: "",
@@ -196,7 +189,6 @@ export default function AddConnectionScreen() {
         directory: directory.trim() || undefined,
         username: username.trim() || undefined,
       },
-      "onboarding",
       password || undefined,
     )
 
@@ -225,10 +217,9 @@ export default function AddConnectionScreen() {
     }
 
     // Failed: same "Connection Failed" alert as Quick Connect — run active
-    // diagnostics, capture to Sentry, and offer a shareable report instead of
-    // silently persisting an unreachable/unauthorized connection.
+    // diagnostics and offer a shareable report instead of silently persisting
+    // an unreachable/unauthorized connection.
     const report = await probeConnection(url.trim(), buildAuth(username, password))
-    captureDiagnostic(report)
     setIsConnecting(false)
     Alert.alert(
       t("connection.shared.alerts.connectionFailedTitle"),

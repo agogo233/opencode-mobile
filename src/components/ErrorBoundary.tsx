@@ -1,13 +1,12 @@
 // App-level React error boundary. Catches render-time exceptions anywhere in
-// the component tree, reports them to Sentry with the React component stack,
-// and presents a recovery UI that lets the user share a diagnostic report
-// (logs + device info + stack) before retrying. The retry path remounts the
-// children, which is enough recovery for the vast majority of render bugs;
-// truly fatal cases will just re-throw and the user can share again.
+// the component tree and presents a recovery UI that lets the user share a
+// diagnostic report (logs + device info + stack) before retrying. The retry
+// path remounts the children, which is enough recovery for the vast majority
+// of render bugs; truly fatal cases will just re-throw and the user can share
+// again.
 
 import React from "react"
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
-import { captureException } from "../lib/sentry"
 import { buildCrashReport, shareReport } from "../lib/diagnostics"
 import { log } from "../lib/logbuffer"
 // Class component — can't use the useTranslation() hook, so resolve strings
@@ -33,11 +32,6 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     log.error("boundary", "react render crash", error.message)
-    captureException(error, {
-      level: "fatal",
-      tags: { "crash.source": "react-boundary" },
-      extra: { componentStack: info.componentStack ?? "" },
-    })
     this.setState({ componentStack: info.componentStack ?? null })
   }
 

@@ -21,7 +21,6 @@ import {
   granted as notificationsGranted,
 } from "../../src/lib/notifications"
 import type { Category } from "../../src/lib/notifications"
-import { hasTelemetryConsent, setTelemetryConsent } from "../../src/lib/telemetry"
 import { PRIVACY_POLICY_URL } from "../../src/lib/links"
 import { CURRENT_VERSION, checkForUpdate, type AvailableUpdate } from "../../src/lib/update-check"
 import type { LocalePreference } from "../../src/lib/i18n/locale-resolve"
@@ -78,7 +77,6 @@ export default function SettingsScreen() {
   const { settings, hasBiometrics, updateSettings, lock } = useAuth()
   const { notifications, setNotification, locale, setLocale } = useSettings()
   const [osGranted, setOsGranted] = useState<boolean | null>(null)
-  const [telemetryUpdating, setTelemetryUpdating] = useState(false)
 
   // Settings is where a user goes to ask "what am I running?". Answer it, and if
   // a newer build exists say so here too — the banner on the sessions list is
@@ -96,26 +94,6 @@ export default function SettingsScreen() {
       cancelled = true
     }
   }, [])
-
-  // Telemetry consent: hasTelemetryConsent() returns null (unknown), true, or false.
-  // We initialise local state from in-memory value; updates call setTelemetryConsent().
-  const [crashReporting, setCrashReporting] = useState<boolean>(hasTelemetryConsent() ?? false)
-
-  const handleCrashReportingToggle = useCallback(
-    async (value: boolean) => {
-      setTelemetryUpdating(true)
-      try {
-        await setTelemetryConsent(value)
-        setCrashReporting(value)
-      } catch {
-        setCrashReporting(hasTelemetryConsent() ?? false)
-        Alert.alert(t("settings.alerts.privacyNotSavedTitle"), t("settings.alerts.privacyNotSavedMessage"))
-      } finally {
-        setTelemetryUpdating(false)
-      }
-    },
-    [t],
-  )
 
   // Check OS permission state on first toggle attempt
   const handleToggle = useCallback(
@@ -232,20 +210,6 @@ export default function SettingsScreen() {
       </SettingSection>
 
       <SettingSection title={t("settings.sections.privacy")} isDark={isDark}>
-        <SettingRow
-          icon="shield-checkmark"
-          label={t("settings.privacy.crashReporting.label")}
-          description={t("settings.privacy.crashReporting.description")}
-          isDark={isDark}
-          right={
-            <Switch
-              value={crashReporting}
-              onValueChange={handleCrashReportingToggle}
-              disabled={telemetryUpdating}
-              trackColor={{ false: "#767577", true: "#22c55e" }}
-            />
-          }
-        />
         <SettingRow
           icon="document-text"
           label={t("settings.privacy.privacyPolicy.label")}

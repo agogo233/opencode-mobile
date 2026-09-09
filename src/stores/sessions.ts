@@ -2,8 +2,6 @@ import { create } from "zustand"
 import { ApiError, type Session, type Message, type Part, type Event, type MessageWithParts, type Client } from "../lib/sdk"
 import { useConnections } from "./connections"
 import { useSettings } from "./settings"
-import { addBreadcrumb } from "../lib/sentry"
-import { AnalyticsEvent, track } from "../lib/analytics"
 import { extractPromptFromParts, type PromptFromParts } from "../lib/prompt-from-parts"
 import { mergeIncomingMessage } from "../lib/message-merge"
 import { isColdSessionLoad, isLiveEventForSession } from "../lib/session-load-reconcile"
@@ -66,8 +64,8 @@ export type RevertResult = ({ ok: true } & PromptFromParts) | { ok: false; reaso
 // Sessions the user aborted since they last went busy. Mirrors events.ts's
 // erroredSessions: SessionStatus has no "aborted" variant — an aborted run
 // still ends with a busy -> idle transition — so without this mark a
-// user-cancelled run would count as response_received in analytics and as a
-// success toward the store review prompt. events.ts (which already imports
+// user-cancelled run would count as a success toward the store review
+// prompt. events.ts (which already imports
 // this module) clears entries on busy and checks them on busy -> idle.
 export const abortedSessions = new Set<string>()
 
@@ -128,7 +126,6 @@ export const useSessions = create<SessionsState>((set, get) => ({
     }
 
     const seq = ++selectSeq
-    addBreadcrumb({ category: "session", message: "select", data: { sessionID, hasDirectory: Boolean(directory) } })
     // Re-selecting the session already shown on screen (e.g. #121's
     // useFocusEffect resync firing again on re-entry) is a background
     // refresh, not a cold load: the screen already has this session's
@@ -264,7 +261,6 @@ export const useSessions = create<SessionsState>((set, get) => ({
 
     try {
       set((state) => ({ sending: { ...state.sending, [session.id]: true }, error: null }))
-      track(AnalyticsEvent.MessageSent)
 
       // Add user message optimistically
       const ts = Date.now()

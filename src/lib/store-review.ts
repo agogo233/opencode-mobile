@@ -3,8 +3,7 @@
  *
  * Nudges the user toward an App Store / Play Store rating after they've hit
  * a few genuinely successful sessions — never from an error path. Persisted
- * state lives in expo-secure-store, mirroring the consent pattern in
- * telemetry.ts:
+ * state lives in expo-secure-store:
  *   - a running count of successful sessions
  *   - a one-time "already asked" flag so we prompt at most once, ever
  *
