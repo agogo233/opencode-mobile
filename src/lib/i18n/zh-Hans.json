@@ -38,10 +38,6 @@
       "disabledNotice": "通知已在系统层面关闭。请在系统设置中启用通知以接收提醒。"
     },
     "privacy": {
-      "crashReporting": {
-        "label": "崩溃报告与使用分析",
-        "description": "分享匿名崩溃报告（Sentry）和使用分析（PostHog），帮助改进 OpenCode。您分享的诊断报告也会发送至我们的支持收件箱。不包含代码或提示词内容。"
-      },
       "privacyPolicy": {
         "label": "隐私政策",
         "description": "我们收集哪些数据及收集方式"
@@ -70,8 +66,6 @@
       "tagline": "随时随地连接您的 AI 编程助手"
     },
     "alerts": {
-      "privacyNotSavedTitle": "隐私设置未保存",
-      "privacyNotSavedMessage": "本次会话已关闭崩溃报告，但您的选择未能保存。请重试。",
       "notificationsDisabledTitle": "通知已关闭",
       "notificationsDisabledMessage": "请在设备设置中为 OpenCode 启用通知以接收提醒。"
     }
@@ -190,20 +184,7 @@
         "helpProtocolMiddle": "，除非已配置 TLS，此时请使用 ",
         "helpProtocolSuffix": "。",
         "helpRunningPrefix": "请确保 OpenCode 正在运行：",
-        "connectCardTitle": "OpenCode Connect",
-        "connectCardBadge": "即将上线",
-        "connectCardDesc": "将手机桥接到您的 opencode 服务器 — 无需配置隧道或防火墙。一键连接，随时随地。",
         "advancedLink": "高级选项（隧道、云端、身份验证）"
-      },
-      "waitlist": {
-        "successText": "您已加入候补名单 — OpenCode Connect 准备就绪时我们会通过邮件通知您。",
-        "joinButton": "加入候补名单",
-        "alertTitle": "加入候补名单",
-        "queuedText": "已保存在此设备上 — 联网后我们会自动完成注册，你无需再做任何操作。",
-        "emailUsLink": "仍然无法注册？改为给我们发邮件",
-        "emailUsButton": "发送邮件",
-        "queueFailedMessage": "无法连接注册服务，也无法在此设备上保存你的请求。你可以改为给我们发邮件，我们会手动将你加入名单。",
-        "noMailAppMessage": "没有可用的邮件应用。请发送邮件至 support@agentlabs.cc，主题为 \"OpenCode Connect Waitlist\"。"
       },
       "advanced": {
         "backToQuick": "简易模式",
@@ -384,23 +365,6 @@
     "shareButton": "分享报告",
     "tryAgainButton": "重试"
   },
-  "telemetryConsent": {
-    "title": "帮助改进 OpenCode？",
-    "body": "分享匿名崩溃报告和使用分析，帮助我们更快地发现并修复问题。您分享的诊断报告也会发送至我们的支持收件箱。绝不包含代码、提示词或服务器地址。",
-    "bullets": {
-      "deviceInfo": "设备型号、系统版本、应用版本",
-      "stackTraces": "崩溃堆栈跟踪（不含变量值）",
-      "usageEvents": "匿名使用事件（打开应用、连接尝试、发送消息）— 发送至 PostHog EU",
-      "noCode": "您的代码、提示词或聊天消息",
-      "noServerUrls": "服务器地址或身份验证令牌"
-    },
-    "privacyLink": "阅读完整隐私政策",
-    "declineA11yLabel": "不用了，拒绝崩溃报告和使用分析",
-    "declineButton": "不用了",
-    "allowA11yLabel": "允许匿名崩溃报告和使用分析",
-    "allowButton": "允许",
-    "footnote": "您可以随时在设置 → 隐私中更改此设置。"
-  },
   "authGate": {
     "title": "OpenCode 已锁定",
     "subtitle": "请验证身份以访问您的会话",
@@ -510,12 +474,5 @@
     "connectButton": "连接您自己的服务器",
     "setupGuideLink": "如何设置服务器",
     "hostedCtaLink": "没有服务器？加入 OpenCode Connect 候补名单 — 托管，无需搭建"
-  },
-  "update": {
-    "available": "有可用更新",
-    "body": "版本 {{version}} 已发布，你当前使用的是 {{current}}。",
-    "action": "去获取",
-    "dismiss": "暂不",
-    "upToDate": "已是最新"
   }
 }

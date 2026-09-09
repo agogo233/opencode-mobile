@@ -38,10 +38,6 @@
       "disabledNotice": "Notifications are disabled at the system level. Enable them in Settings to receive alerts."
     },
     "privacy": {
-      "crashReporting": {
-        "label": "Crash Reports & Usage Analytics",
-        "description": "Share anonymous crash reports (Sentry) and usage analytics (PostHog) to help improve OpenCode. Diagnostic reports you share are also delivered to our support inbox. No code or prompts are included."
-      },
       "privacyPolicy": {
         "label": "Privacy Policy",
         "description": "What data we collect and how"
@@ -70,8 +66,6 @@
       "tagline": "Connect to your AI coding assistant from anywhere"
     },
     "alerts": {
-      "privacyNotSavedTitle": "Privacy Setting Not Saved",
-      "privacyNotSavedMessage": "Crash reporting is off for this session, but your choice could not be saved. Please try again.",
       "notificationsDisabledTitle": "Notifications Disabled",
       "notificationsDisabledMessage": "Enable notifications for OpenCode in your device settings to receive alerts."
     }
@@ -190,20 +184,7 @@
         "helpProtocolMiddle": " for local and Tailscale addresses unless TLS is configured, then use ",
         "helpProtocolSuffix": ".",
         "helpRunningPrefix": "Make sure OpenCode is running:",
-        "connectCardTitle": "OpenCode Connect",
-        "connectCardBadge": "Coming Soon",
-        "connectCardDesc": "Bridge your phone to your opencode server — no tunnel setup, no firewall config. One-tap connect from anywhere.",
         "advancedLink": "Advanced options (tunnels, cloud, auth)"
-      },
-      "waitlist": {
-        "successText": "You're on the list — we'll email you when OpenCode Connect is ready.",
-        "joinButton": "Join Waitlist",
-        "alertTitle": "Join Waitlist",
-        "queuedText": "Saved on this device — we'll finish signing you up as soon as you're back online. You don't have to do anything.",
-        "emailUsLink": "Still not working? Email us instead",
-        "emailUsButton": "Email us",
-        "queueFailedMessage": "We couldn't reach the signup service or save your request on this device. You can email us instead and we'll add you by hand.",
-        "noMailAppMessage": "No email app is available. Please email support@agentlabs.cc with subject \"OpenCode Connect Waitlist\"."
       },
       "advanced": {
         "backToQuick": "Simple mode",
@@ -384,23 +365,6 @@
     "shareButton": "Share Report",
     "tryAgainButton": "Try Again"
   },
-  "telemetryConsent": {
-    "title": "Help improve OpenCode?",
-    "body": "Share anonymous crash reports and usage analytics to help us find and fix bugs faster. Diagnostic reports you share are also delivered to our support inbox. No code, prompts, or server addresses are ever included.",
-    "bullets": {
-      "deviceInfo": "Device model, OS version, app version",
-      "stackTraces": "Stack traces of crashes (no variable values)",
-      "usageEvents": "Anonymous usage events (app opened, connection attempts, messages sent) — sent to PostHog EU",
-      "noCode": "Your code, prompts, or chat messages",
-      "noServerUrls": "Server URLs or authentication tokens"
-    },
-    "privacyLink": "Read our full privacy policy",
-    "declineA11yLabel": "No thanks, decline crash reporting and analytics",
-    "declineButton": "No thanks",
-    "allowA11yLabel": "Allow anonymous crash reports and usage analytics",
-    "allowButton": "Allow",
-    "footnote": "You can change this at any time in Settings → Privacy."
-  },
   "authGate": {
     "title": "OpenCode Locked",
     "subtitle": "Authenticate to access your sessions",
@@ -510,12 +474,5 @@
     "connectButton": "Connect your own server",
     "setupGuideLink": "How to set up a server",
     "hostedCtaLink": "No server? Join the OpenCode Connect waitlist — hosted, no setup"
-  },
-  "update": {
-    "available": "Update available",
-    "body": "Version {{version}} is out. You're on {{current}}.",
-    "action": "Get it",
-    "dismiss": "Not now",
-    "upToDate": "Up to date"
   }
 }
