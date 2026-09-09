@@ -10,9 +10,6 @@ jobs:
       EXPO_PUBLIC_SENTRY_DSN: ${{ secrets.EXPO_PUBLIC_SENTRY_DSN }}
       EXPO_PUBLIC_POSTHOG_KEY: ${{ secrets.EXPO_PUBLIC_POSTHOG_KEY }}
       EXPO_PUBLIC_CHATWOOT_INBOX_IDENTIFIER: ${{ secrets.EXPO_PUBLIC_CHATWOOT_INBOX_IDENTIFIER }}
-      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-      SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-      SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
     steps:
       - uses: actions/checkout@v6
 
@@ -43,29 +40,26 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Set Sentry release identifiers
-        # Mirrors build.yml: sentry.gradle defaults the upload's --release/--dist
-        # to `${applicationId}@${versionName}+${versionCode}`, which does NOT
-        # match what the app reports at runtime (`opencode-mobile@${app.json
-        # version}`, see src/lib/sentry.ts). Pin them to match or symbolication
-        # silently fails.
-        run: |
-          VERSION=$(node -p "require('./app.json').expo.version")
-          echo "SENTRY_RELEASE=opencode-mobile@${VERSION}" >> "$GITHUB_ENV"
-          echo "SENTRY_DIST=${VERSION}" >> "$GITHUB_ENV"
-          echo "Sentry release=opencode-mobile@${VERSION} dist=${VERSION}"
-
       - name: Purge stale generated sources
         # The Gradle cache (restore-keys prefix fallback) can restore a
         # generated autolinking tree from a previous package id. Gradle then
         # reuses ReactNativeApplicationEntryPoint.java referencing the OLD
-        # package (ai.opencode.mobile.BuildConfig) and compileReleaseJavaWithJavac
-        # fails. Delete generated sources so prebuild + Gradle regenerate them
-        # for the current package (cc.agentlabs.opencode).
+        # package and compileReleaseJavaWithJavac fails. Delete generated
+        # sources so prebuild + Gradle regenerate them.
         run: rm -rf android/app/build/generated android/build/generated android/app/build/intermediates
 
       - name: Expo prebuild
         run: npx expo prebuild --platform android --no-install
+
+      - name: Disable Sentry source map upload
+        # This fork's cloud build has no SENTRY_* secrets (the gradle-side
+        # sentry-cli upload fails with "Project not found" when they are
+        # unset — see run 34354070526). Runtime Sentry.init() is gated on
+        # EXPO_PUBLIC_SENTRY_DSN anyway, so dropping the build-time upload
+        # loses nothing. Same strip the F-Droid job applies. MUST run AFTER
+        # prebuild: the @sentry/react-native/expo config plugin re-adds the
+        # apply line each prebuild.
+        run: sed -i '/apply from.*sentry.gradle/d' android/app/build.gradle
 
       - name: Setup signing
         run: |
