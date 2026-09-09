@@ -41,29 +41,31 @@ import { useCatalog } from "../../src/stores/catalog"
 import { useSpeech } from "../../src/lib/speech"
 
 // --- Builtin slash commands ---
-const BUILTIN_COMMANDS: SlashCommand[] = [
-  {
-    trigger: "new",
-    title: "New Session",
-    description: "Start a new session",
-    icon: "add-circle-outline",
-    type: "builtin",
-  },
-  {
-    trigger: "model",
-    title: "Switch Model",
-    description: "Choose a different model",
-    icon: "hardware-chip-outline",
-    type: "builtin",
-  },
-  {
-    trigger: "agent",
-    title: "Switch Agent",
-    description: "Cycle to next agent",
-    icon: "person-outline",
-    type: "builtin",
-  },
-]
+function builtinCommands(t: (key: string) => string): SlashCommand[] {
+  return [
+    {
+      trigger: "new",
+      title: t("session.slash.new.title"),
+      description: t("session.slash.new.description"),
+      icon: "add-circle-outline",
+      type: "builtin",
+    },
+    {
+      trigger: "model",
+      title: t("session.slash.model.title"),
+      description: t("session.slash.model.description"),
+      icon: "hardware-chip-outline",
+      type: "builtin",
+    },
+    {
+      trigger: "agent",
+      title: t("session.slash.agent.title"),
+      description: t("session.slash.agent.description"),
+      icon: "person-outline",
+      type: "builtin",
+    },
+  ]
+}
 
 function getShortDir(dir?: string): string | null {
   if (!dir) return null
@@ -77,7 +79,7 @@ export default function SessionScreen() {
   const colorScheme = useColorScheme()
   const isDark = colorScheme === "dark"
   const insets = useSafeAreaInsets()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
 
   const flatListRef = useRef<FlatList>(null)
   const modelSheetRef = useRef<BottomSheet>(null)
@@ -165,8 +167,8 @@ export default function SessionScreen() {
       icon: "code-slash-outline",
       type: "custom",
     }))
-    return [...custom, ...BUILTIN_COMMANDS]
-  }, [serverCommands])
+    return [...custom, ...builtinCommands(t)]
+  }, [serverCommands, i18n.language])
 
   // While a revert is pending, the reverted message and everything after it
   // still exist server-side (cleanup only runs on the next prompt/unrevert)

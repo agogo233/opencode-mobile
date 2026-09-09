@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition"
 
 interface SpeechState {
@@ -14,6 +15,7 @@ interface SpeechActions {
 }
 
 export function useSpeech(onResult: (text: string) => void): SpeechState & SpeechActions {
+  const { i18n } = useTranslation()
   const [listening, setListening] = useState(false)
   const [transcript, setTranscript] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -59,11 +61,11 @@ export function useSpeech(onResult: (text: string) => void): SpeechState & Speec
       return
     }
     ExpoSpeechRecognitionModule.start({
-      lang: "en-US",
+      lang: i18n.language === "zh-Hans" ? "zh-CN" : "en-US",
       interimResults: true,
       continuous: true,
     })
-  }, [])
+  }, [i18n.language])
 
   const stop = useCallback(() => {
     ExpoSpeechRecognitionModule.stop()

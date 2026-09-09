@@ -545,7 +545,7 @@ export default function SessionsScreen() {
 
       {error && (
         <View style={styles.errorBar}>
-          <Text style={styles.errorText}>{error}</Text>
+          <Text style={styles.errorText}>{error.startsWith("errors.") ? t(error) : error}</Text>
         </View>
       )}
 

@@ -11,6 +11,7 @@ import { type Classification, type ProbeAttempt, type ParsedUrl, parseUrl, class
 import { chatwootConfigured, sendSupportReport } from "./chatwoot"
 import { hasTelemetryConsent, loadTelemetryConsent } from "./telemetry"
 import { redactHostAndUrls } from "./scrub"
+import i18n from "./i18n/config"
 
 export type { Classification, ProbeAttempt } from "./diagnostics-classify"
 
@@ -119,6 +120,34 @@ export async function probeConnection(url: string, auth?: { username: string; pa
 
   log.info("diag", "probe result", classification, "-", summary)
   return report
+}
+
+// The shared report keeps its English `summary` (it is meant for support/dev
+// diagnostics); alerts translate at display time instead.
+const FAILURE_SUFFIX: Record<Classification, string> = {
+  "ok": "ok",
+  "malformed-url": "malformedUrl",
+  "no-internet": "noInternet",
+  "server-unreachable": "serverUnreachable",
+  "auth-failed": "authFailed",
+  "health-failed": "healthFailed",
+  "tls-error": "tlsError",
+  "timeout": "timeout",
+  "unknown": "unknown",
+}
+
+export function translatedFailureSummary(report: DiagnosticReport): string {
+  const health = report.attempts[0]
+  const suffix =
+    report.classification === "server-unreachable" && report.isHostname
+      ? "serverUnreachableDns"
+      : FAILURE_SUFFIX[report.classification]
+  return i18n.t("connection.failure." + suffix, {
+    status: health?.status ?? "error",
+    host: report.host,
+    port: report.port,
+    defaultValue: report.summary,
+  })
 }
 
 export function formatReport(report: DiagnosticReport): string {

@@ -8,6 +8,10 @@
     "save": "Save",
     "shareReport": "Share report"
   },
+  "codeBlock": {
+    "copy": "Copy",
+    "copied": "Copied!"
+  },
   "settings": {
     "sections": {
       "security": "Security",
@@ -123,6 +127,20 @@
       "imageFailedMessage": "One or more images could not be processed. Please try a different photo.",
       "speechErrorTitle": "Voice input failed",
       "speechErrorMessage": "Could not use voice input. Check your microphone permission and try again."
+    },
+    "slash": {
+      "new": {
+        "title": "New Session",
+        "description": "Start a new session"
+      },
+      "model": {
+        "title": "Switch Model",
+        "description": "Choose a different model"
+      },
+      "agent": {
+        "title": "Switch Agent",
+        "description": "Cycle to next agent"
+      }
     }
   },
   "connection": {
@@ -216,6 +234,17 @@
         "deleteTitle": "Delete Connection",
         "deleteMessage": "Are you sure you want to delete \"{{name}}\"?"
       }
+    },
+    "failure": {
+      "malformedUrl": "The server URL could not be parsed. Check for typos or extra characters.",
+      "ok": "Health endpoint responded — connection actually works now.",
+      "authFailed": "The server rejected your credentials (HTTP {{status}}). Check the password, and the username if you set OPENCODE_SERVER_USERNAME on the server (it defaults to \"opencode\"). The server itself is running and reachable.",
+      "tlsError": "TLS/certificate problem. Try http:// instead of https://, or fix the server certificate.",
+      "healthFailed": "Server is reachable but /global/health failed (HTTP {{status}}). Likely a wrong path or an old server version.",
+      "noInternet": "The device has no working internet/network at all (public check also failed). Check Wi-Fi/data and Tailscale (VPN) status.",
+      "timeout": "Connection to the server timed out (dropped, not refused). Likely a firewall, wrong port, or Tailscale ACL blocking the device.",
+      "serverUnreachable": "Internet works, but the server at {{host}}:{{port}} is unreachable. Confirm the opencode server is running, the device is on the same tailnet, and the port is correct.",
+      "serverUnreachableDns": "Internet works, but the server at {{host}}:{{port}} is unreachable. Hostname may not resolve from this device (MagicDNS off?). Try the raw Tailscale IP. Confirm the opencode server is running, the device is on the same tailnet, and the port is correct."
     }
   },
   "nav": {
@@ -313,7 +342,37 @@
         "label": "Connection",
         "description": "When the app loses connection for an extended period"
       }
-    }
+    },
+    "messages": {
+      "connectionInterrupted": "Connection interrupted",
+      "reconnectingFallback": "Trying to reconnect to your server",
+      "taskCompleted": "Task completed",
+      "taskCompletedFallback": "Session finished processing",
+      "sessionError": "Session error",
+      "sessionErrorFallback": "Something went wrong",
+      "approvalNeeded": "Agent needs approval",
+      "approvalNeededFallback": "A tool needs your approval",
+      "inputNeeded": "Input needed",
+      "questionFallback": "The assistant has a question"
+    },
+    "channelName": "Session Prompts & Updates"
+  },
+  "errors": {
+    "noActiveConnection": "No active connection",
+    "noActiveSession": "No active session",
+    "loadSessions": "Failed to load sessions",
+    "loadSession": "Failed to load session",
+    "createSession": "Failed to create session",
+    "deleteSession": "Failed to delete session",
+    "abortSession": "Failed to abort session",
+    "refreshMessages": "Failed to refresh messages",
+    "revertMessage": "Failed to revert message",
+    "restoreRevertedMessages": "Failed to restore reverted messages",
+    "sessionErrorOccurred": "Session error occurred",
+    "loadConnections": "Failed to load connections",
+    "authInitFailed": "Failed to initialize authentication",
+    "authFailed": "Authentication failed",
+    "authError": "Authentication error"
   },
   "errorBoundary": {
     "title": "Something went wrong",
@@ -345,9 +404,16 @@
   "authGate": {
     "title": "OpenCode Locked",
     "subtitle": "Authenticate to access your sessions",
-    "unlockButton": "Unlock"
+    "unlockButton": "Unlock",
+    "biometricPrompt": "Authenticate to access OpenCode",
+    "biometricSendPrompt": "Authenticate to send message",
+    "biometricFallback": "Use passcode"
   },
   "chat": {
+    "role": {
+      "you": "You",
+      "assistant": "Assistant"
+    },
     "permissionPrompt": {
       "title": "Permission Required",
       "deny": "Deny",

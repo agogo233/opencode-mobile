@@ -16,7 +16,7 @@ import { useTranslation } from "react-i18next"
 import { useConnections } from "../../src/stores/connections"
 import { useEvents } from "../../src/stores/events"
 import type { ConnectionType } from "../../src/lib/types"
-import { probeConnection, shareReport } from "../../src/lib/diagnostics"
+import { probeConnection, shareReport, translatedFailureSummary } from "../../src/lib/diagnostics"
 import { captureDiagnostic } from "../../src/lib/sentry"
 import { parseUrl } from "../../src/lib/diagnostics-classify"
 import { buildAuth } from "../../src/lib/auth"
@@ -109,7 +109,7 @@ export default function EditConnectionScreen() {
     Alert.alert(
       t("connection.shared.alerts.connectionFailedTitle"),
       t("connection.edit.alerts.connectionFailedMessage", {
-        summary: report.summary,
+        summary: translatedFailureSummary(report),
         detail: result.error || t("connection.edit.alerts.noDetail"),
       }),
       [

@@ -1,6 +1,7 @@
 import * as Notifications from "expo-notifications"
 import * as Device from "expo-device"
 import { Platform, AppState } from "react-native"
+import i18n from "./i18n/config"
 
 // ---------------------------------------------------------------------------
 // Categories — every notification belongs to exactly one
@@ -120,7 +121,7 @@ export async function granted(): Promise<boolean> {
 async function ensureChannel() {
   if (Platform.OS !== "android") return
   await Notifications.setNotificationChannelAsync("prompts", {
-    name: "Session Prompts & Updates",
+    name: i18n.t("notifications.channelName"),
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
     sound: "default",

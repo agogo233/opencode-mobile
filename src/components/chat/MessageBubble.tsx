@@ -1,6 +1,7 @@
 import { memo } from "react"
 import { View, Text, Image, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { useTranslation } from "react-i18next"
 import { Markdown } from "../markdown"
 import { ToolCallCard } from "./ToolCallCard"
 import { ReasoningBlock } from "./ReasoningBlock"
@@ -26,6 +27,7 @@ interface Props {
 // built-in block-level memoization that eliminates re-renders for stable blocks
 export const MessageBubble = memo(
   function MessageBubble({ message, parts, isDark, onLongPress }: Props) {
+    const { t } = useTranslation()
     const isUser = message.role === "user"
 
     const textParts = parts.filter((p) => p.type === "text")
@@ -55,7 +57,7 @@ export const MessageBubble = memo(
             size={14}
             color={isUser ? (isDark ? "#ffffff" : "#0a0a0a") : "#8b5cf6"}
           />
-          <Text style={[s.role, isUser && s.roleUser, isDark && s.textWhite]}>{isUser ? "You" : "Assistant"}</Text>
+          <Text style={[s.role, isUser && s.roleUser, isDark && s.textWhite]}>{isUser ? t("chat.role.you") : t("chat.role.assistant")}</Text>
           {message.model && <Text style={[s.modelTag, isDark && s.modelTagDark]}>{message.model.modelID}</Text>}
           {!isUser && message.modelID && <Text style={[s.modelTag, isDark && s.modelTagDark]}>{message.modelID}</Text>}
         </View>

@@ -50,7 +50,7 @@ export function AuthGate({ children }: Props) {
         <Text style={[styles.title, isDark && styles.textDark]}>{t("authGate.title")}</Text>
         <Text style={[styles.subtitle, isDark && styles.subtitleDark]}>{t("authGate.subtitle")}</Text>
 
-        {error && <Text style={styles.error}>{error}</Text>}
+        {error && <Text style={styles.error}>{error.startsWith("errors.") ? t(error) : error}</Text>}
 
         <TouchableOpacity style={[styles.button, isDark && styles.buttonDark]} onPress={authenticate}>
           <Ionicons name={iconName} size={24} color={isDark ? "#0a0a0a" : "#ffffff"} />

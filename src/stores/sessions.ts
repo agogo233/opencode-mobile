@@ -103,7 +103,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     // not just the one matching the active connection's directory header.
     const client = connState.clientForDirectory(undefined) || connState.client
     if (!client) {
-      set({ error: "No active connection" })
+      set({ error: "errors.noActiveConnection" })
       return
     }
 
@@ -114,7 +114,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
       const sessions = await client.session.list({ roots: true, limit: 50 })
       set({ sessions, isLoading: false })
     } catch (error) {
-      set({ error: "Failed to load sessions", isLoading: false })
+      set({ error: "errors.loadSessions", isLoading: false })
     }
   },
 
@@ -123,7 +123,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     const connState = useConnections.getState()
     const client = directory ? connState.clientForDirectory(directory) : connState.client
     if (!client) {
-      set({ error: "No active connection" })
+      set({ error: "errors.noActiveConnection" })
       return
     }
 
@@ -173,7 +173,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     } catch (err) {
       if (seq !== selectSeq) return
       console.error("Failed to load session:", err)
-      set({ error: "Failed to load session", isLoading: false })
+      set({ error: "errors.loadSession", isLoading: false })
     }
   },
 
@@ -211,7 +211,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     const connState = useConnections.getState()
     const client = connState.client
     if (!client) {
-      set({ error: "No active connection" })
+      set({ error: "errors.noActiveConnection" })
       return null
     }
 
@@ -228,7 +228,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
       })
       return created
     } catch (error) {
-      set({ error: "Failed to create session" })
+      set({ error: "errors.createSession" })
       return null
     }
   },
@@ -237,7 +237,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     const session = get().sessions.find((s) => s.id === sessionID)
     const client = clientFor(session?.directory)
     if (!client) {
-      set({ error: "No active connection" })
+      set({ error: "errors.noActiveConnection" })
       return
     }
 
@@ -250,7 +250,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
         parts: state.currentSession?.id === sessionID ? {} : state.parts,
       }))
     } catch (error) {
-      set({ error: "Failed to delete session" })
+      set({ error: "errors.deleteSession" })
     }
   },
 
@@ -258,7 +258,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     const client = clientFor(get().currentSession?.directory)
     const session = get().currentSession
     if (!client || !session) {
-      set({ error: "No active session" })
+      set({ error: "errors.noActiveSession" })
       return
     }
 
@@ -346,7 +346,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
       abortedSessions.add(session.id)
       set((state) => ({ sending: { ...state.sending, [session.id]: false } }))
     } catch {
-      set({ error: "Failed to abort session" })
+      set({ error: "errors.abortSession" })
     }
   },
 
@@ -360,7 +360,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
       const { messages, parts } = parseMessages(response)
       set({ messages, parts })
     } catch (error) {
-      set({ error: "Failed to refresh messages" })
+      set({ error: "errors.refreshMessages" })
     }
   },
 
@@ -391,7 +391,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
         if (err.status === 401 || err.status === 403) return { ok: false, reason: "auth" }
       }
       console.error("Failed to revert message:", err)
-      set({ error: "Failed to revert message" })
+      set({ error: "errors.revertMessage" })
       return { ok: false, reason: "error" }
     }
   },
@@ -408,7 +408,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
       }))
     } catch (err) {
       console.error("Failed to unrevert session:", err)
-      set({ error: "Failed to restore reverted messages" })
+      set({ error: "errors.restoreRevertedMessages" })
     }
   },
 

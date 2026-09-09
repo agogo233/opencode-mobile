@@ -132,7 +132,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         isLoading: false,
       })
     } catch (error) {
-      set({ error: "Failed to load connections", isLoading: false })
+      set({ error: "errors.loadConnections", isLoading: false })
     }
   },
 

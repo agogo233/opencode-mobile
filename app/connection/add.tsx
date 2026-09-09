@@ -16,7 +16,7 @@ import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useConnections } from "../../src/stores/connections"
 import type { ConnectionType } from "../../src/lib/types"
-import { probeConnection, shareReport } from "../../src/lib/diagnostics"
+import { probeConnection, shareReport, translatedFailureSummary } from "../../src/lib/diagnostics"
 import { captureDiagnostic } from "../../src/lib/sentry"
 import { parseUrl } from "../../src/lib/diagnostics-classify"
 import { buildAuth } from "../../src/lib/auth"
@@ -153,7 +153,7 @@ export default function AddConnectionScreen() {
       Alert.alert(
         t("connection.shared.alerts.connectionFailedTitle"),
         t("connection.add.alerts.connectionFailedMessage", {
-          summary: report.summary,
+          summary: translatedFailureSummary(report),
           target: serverUrl,
           error: result.error || t("connection.shared.alerts.unknownError"),
         }),
@@ -233,7 +233,7 @@ export default function AddConnectionScreen() {
     Alert.alert(
       t("connection.shared.alerts.connectionFailedTitle"),
       t("connection.add.alerts.connectionFailedMessage", {
-        summary: report.summary,
+        summary: translatedFailureSummary(report),
         target: url.trim(),
         error: result.error || t("connection.shared.alerts.unknownError"),
       }),

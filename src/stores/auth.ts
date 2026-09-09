@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import * as LocalAuthentication from "expo-local-authentication"
 import * as SecureStore from "expo-secure-store"
+import i18n from "../lib/i18n/config"
 
 const AUTH_SETTINGS_KEY = "opencode_auth_settings"
 
@@ -69,7 +70,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       })
     } catch (error) {
       set({
-        error: "Failed to initialize authentication",
+        error: "errors.authInitFailed",
         isLoading: false,
         isAuthenticated: false,
       })
@@ -86,8 +87,8 @@ export const useAuth = create<AuthState>((set, get) => ({
 
     try {
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Authenticate to access OpenCode",
-        fallbackLabel: "Use passcode",
+        promptMessage: i18n.t("authGate.biometricPrompt"),
+        fallbackLabel: i18n.t("authGate.biometricFallback"),
         disableDeviceFallback: false,
       })
 
@@ -96,10 +97,10 @@ export const useAuth = create<AuthState>((set, get) => ({
         return true
       }
 
-      set({ error: result.error || "Authentication failed" })
+      set({ error: result.error || "errors.authFailed" })
       return false
     } catch (error) {
-      set({ error: "Authentication error" })
+      set({ error: "errors.authError" })
       return false
     }
   },
@@ -116,8 +117,8 @@ export const useAuth = create<AuthState>((set, get) => ({
 
     try {
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Authenticate to send message",
-        fallbackLabel: "Use passcode",
+        promptMessage: i18n.t("authGate.biometricSendPrompt"),
+        fallbackLabel: i18n.t("authGate.biometricFallback"),
         disableDeviceFallback: false,
       })
 

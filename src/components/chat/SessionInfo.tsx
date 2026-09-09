@@ -24,8 +24,8 @@ function compact(n: number): string {
   return String(n)
 }
 
-function formatCost(cost: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cost)
+function formatCost(cost: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).format(cost)
 }
 
 function formatTime(ts: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -52,7 +52,7 @@ export function SessionInfo({
   onScrollToTop,
   onClose,
 }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   // Match TUI: last assistant message tokens (context window), cumulative cost
   const stats = useMemo(() => {
     let cost = 0
@@ -105,7 +105,7 @@ export function SessionInfo({
               {stats.percent > 0 && <Text style={[s.percent, isDark && s.dimDark]}>{`  ${stats.percent}%`}</Text>}
             </Text>
           )}
-          {hasCost && <Text style={[s.cost, isDark && s.dimDark]}>({formatCost(stats.cost)})</Text>}
+          {hasCost && <Text style={[s.cost, isDark && s.dimDark]}>({formatCost(stats.cost, i18n.language)})</Text>}
           {!hasTokens && !hasCost && (
             <Text style={[s.cost, isDark && s.dimDark]}>{t("chat.sessionInfo.noUsageData")}</Text>
           )}

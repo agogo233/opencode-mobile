@@ -9,6 +9,7 @@ import { AnalyticsEvent, track } from "../lib/analytics"
 import { recordSuccessfulSession } from "../lib/store-review"
 import { isAuthError } from "../lib/api-error"
 import { isSessionActuallyIdle } from "../lib/session-status-reconcile"
+import i18n from "../lib/i18n/config"
 import type { Client, Part, Session, Message } from "../lib/sdk"
 
 // Session status from the server
@@ -199,8 +200,8 @@ export const useEvents = create<EventsState>((set, get) => ({
         if (disconnectedFor >= PROLONGED_DISCONNECT_MS) {
           notify({
             category: "connection",
-            title: "Connection interrupted",
-            body: sanitizeBody(undefined, "Trying to reconnect to your server"),
+            title: i18n.t("notifications.messages.connectionInterrupted"),
+            body: sanitizeBody(undefined, i18n.t("notifications.messages.reconnectingFallback")),
             sessionId: "",
             dedupeKey: "sse-prolonged-disconnect",
             dedupeCooldownMs: 60_000,
@@ -287,8 +288,8 @@ export const useEvents = create<EventsState>((set, get) => ({
                   const match = useSessions.getState().sessions.find((s) => s.id === sessionID)
                   notify({
                     category: "completed",
-                    title: "Task completed",
-                    body: sanitizeBody(match?.title, "Session finished processing"),
+                    title: i18n.t("notifications.messages.taskCompleted"),
+                    body: sanitizeBody(match?.title, i18n.t("notifications.messages.taskCompletedFallback")),
                     sessionId: sessionID,
                   })
                 }
@@ -355,7 +356,7 @@ export const useEvents = create<EventsState>((set, get) => ({
                 sending: { ...state.sending, [sessionID]: false },
                 // Surface error only if user is viewing this session
                 ...(state.currentSession?.id === sessionID
-                  ? { error: error?.message || "Session error occurred" }
+                  ? { error: error?.message || "errors.sessionErrorOccurred" }
                   : {}),
               }))
               if (useSessions.getState().currentSession?.id === sessionID) {
@@ -363,8 +364,8 @@ export const useEvents = create<EventsState>((set, get) => ({
               }
               notify({
                 category: "errors",
-                title: "Session error",
-                body: sanitizeBody(error?.message, "Something went wrong"),
+                title: i18n.t("notifications.messages.sessionError"),
+                body: sanitizeBody(error?.message, i18n.t("notifications.messages.sessionErrorFallback")),
                 sessionId: sessionID,
               })
               break
@@ -383,14 +384,14 @@ export const useEvents = create<EventsState>((set, get) => ({
               }))
               notify({
                 category: "permissions",
-                title: "Agent needs approval",
+                title: i18n.t("notifications.messages.approvalNeeded"),
                 body: sanitizeBody(
                   req.permission
                     ? req.patterns?.length
                       ? `${req.permission}: ${req.patterns.join(", ")}`
                       : req.permission
                     : req.patterns?.join(", "),
-                  "A tool needs your approval",
+                  i18n.t("notifications.messages.approvalNeededFallback"),
                 ),
                 sessionId: req.sessionID,
                 dedupeKey: `perm-${req.id}`,
@@ -425,8 +426,8 @@ export const useEvents = create<EventsState>((set, get) => ({
               }))
               notify({
                 category: "questions",
-                title: req.questions?.[0]?.header || "Input needed",
-                body: sanitizeBody(req.questions?.[0]?.question, "The assistant has a question"),
+                title: req.questions?.[0]?.header || i18n.t("notifications.messages.inputNeeded"),
+                body: sanitizeBody(req.questions?.[0]?.question, i18n.t("notifications.messages.questionFallback")),
                 sessionId: req.sessionID,
                 dedupeKey: `question-${req.id}`,
                 dedupeCooldownMs: 60_000,

@@ -8,6 +8,10 @@
     "save": "保存",
     "shareReport": "分享报告"
   },
+  "codeBlock": {
+    "copy": "复制",
+    "copied": "已复制！"
+  },
   "settings": {
     "sections": {
       "security": "安全",
@@ -123,6 +127,20 @@
       "imageFailedMessage": "一张或多张图片无法处理。请尝试其他照片。",
       "speechErrorTitle": "语音输入失败",
       "speechErrorMessage": "无法使用语音输入。请检查麦克风权限后重试。"
+    },
+    "slash": {
+      "new": {
+        "title": "新建会话",
+        "description": "开始一个新会话"
+      },
+      "model": {
+        "title": "切换模型",
+        "description": "选择其他模型"
+      },
+      "agent": {
+        "title": "切换代理",
+        "description": "切换到下一个代理"
+      }
     }
   },
   "connection": {
@@ -216,6 +234,17 @@
         "deleteTitle": "删除连接",
         "deleteMessage": "确定要删除 \"{{name}}\" 吗？"
       }
+    },
+    "failure": {
+      "malformedUrl": "无法解析服务器地址。请检查拼写或多余字符。",
+      "ok": "健康端点有响应 — 连接现在实际可用。",
+      "authFailed": "服务器拒绝了您的凭据（HTTP {{status}}）。请检查密码；如果服务器设置了 OPENCODE_SERVER_USERNAME，也请检查用户名（默认为 \"opencode\"）。服务器本身正在运行且可访问。",
+      "tlsError": "TLS/证书问题。请尝试将 https:// 改为 http://，或修复服务器证书。",
+      "healthFailed": "服务器可访问，但 /global/health 失败（HTTP {{status}}）。可能是路径错误或服务器版本过旧。",
+      "noInternet": "设备完全没有可用的网络（公共检查也失败了）。请检查 Wi-Fi/移动数据及 Tailscale（VPN）状态。",
+      "timeout": "连接服务器超时（连接被丢弃而非拒绝）。可能是防火墙、端口错误，或 Tailscale ACL 拦截了设备。",
+      "serverUnreachable": "网络正常，但无法连接到服务器 {{host}}:{{port}}。请确认 opencode 服务器已启动、设备在同一 tailnet、端口正确。",
+      "serverUnreachableDns": "网络正常，但无法连接到服务器 {{host}}:{{port}}。主机名可能无法解析（MagicDNS 未开启？），请尝试使用 Tailscale 原始 IP。请确认 opencode 服务器已启动、设备在同一 tailnet、端口正确。"
     }
   },
   "nav": {
@@ -313,7 +342,37 @@
         "label": "连接",
         "description": "当应用长时间失去连接时"
       }
-    }
+    },
+    "messages": {
+      "connectionInterrupted": "连接中断",
+      "reconnectingFallback": "正在尝试重新连接服务器",
+      "taskCompleted": "任务完成",
+      "taskCompletedFallback": "会话处理完成",
+      "sessionError": "会话出错",
+      "sessionErrorFallback": "发生了一些问题",
+      "approvalNeeded": "需要审批",
+      "approvalNeededFallback": "工具操作需要你的批准",
+      "inputNeeded": "需要输入",
+      "questionFallback": "助手有一个问题"
+    },
+    "channelName": "会话提示与更新"
+  },
+  "errors": {
+    "noActiveConnection": "没有活动连接",
+    "noActiveSession": "没有活动会话",
+    "loadSessions": "加载会话失败",
+    "loadSession": "加载会话失败",
+    "createSession": "创建会话失败",
+    "deleteSession": "删除会话失败",
+    "abortSession": "中止会话失败",
+    "refreshMessages": "刷新消息失败",
+    "revertMessage": "回退消息失败",
+    "restoreRevertedMessages": "恢复已回退消息失败",
+    "sessionErrorOccurred": "会话发生错误",
+    "loadConnections": "加载连接失败",
+    "authInitFailed": "初始化身份验证失败",
+    "authFailed": "身份验证失败",
+    "authError": "身份验证出错"
   },
   "errorBoundary": {
     "title": "出现了一些问题",
@@ -345,9 +404,16 @@
   "authGate": {
     "title": "OpenCode 已锁定",
     "subtitle": "请验证身份以访问您的会话",
-    "unlockButton": "解锁"
+    "unlockButton": "解锁",
+    "biometricPrompt": "验证身份以访问 OpenCode",
+    "biometricSendPrompt": "验证身份以发送消息",
+    "biometricFallback": "使用密码"
   },
   "chat": {
+    "role": {
+      "you": "你",
+      "assistant": "助手"
+    },
     "permissionPrompt": {
       "title": "需要权限",
       "deny": "拒绝",

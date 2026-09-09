@@ -1158,8 +1158,11 @@ def run_scenario_backgrounded_permission_notification(opencode_url: str, model: 
     appeared = check_notification_drawer(APP_PACKAGE, timeout=15)
     if not appeared:
         # Fallback: match the real notification copy from events.ts / notifications.ts
+        # (both en and zh-Hans catalogs — locale is whatever the emulator/app resolves to)
         appeared = check_notification_drawer("Agent needs approval", timeout=5) or \
-                   check_notification_drawer("A tool needs your approval", timeout=5)
+                   check_notification_drawer("A tool needs your approval", timeout=5) or \
+                   check_notification_drawer("需要审批", timeout=5) or \
+                   check_notification_drawer("工具操作需要你的批准", timeout=5)
 
     results["notification_appeared"] = {
         "status": "success" if appeared else "fail",
