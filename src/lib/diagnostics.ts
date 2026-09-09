@@ -165,15 +165,14 @@ export function formatReport(report: DiagnosticReport): string {
   return lines.join("\n")
 }
 
-// Build a synthetic DiagnosticReport from an unexpected runtime error (e.g.
-// a React render crash or an unhandled promise rejection). Reuses the same
-// formatting / share pipeline as connection diagnostics so users only ever
-// see one kind of "Share report" UI.
-export function buildCrashReport(error: unknown, source: "react-boundary" | "global" = "global"): DiagnosticReport {
+// Build a synthetic DiagnosticReport from a React render crash caught by the
+// ErrorBoundary. Reuses the same formatting / share pipeline as connection
+// diagnostics so users only ever see one kind of "Share report" UI.
+export function buildCrashReport(error: unknown): DiagnosticReport {
   const err = error instanceof Error ? error : new Error(typeof error === "string" ? error : JSON.stringify(error))
   const stackHead = (err.stack ?? "").split("\n").slice(0, 3).join(" | ")
   const attempt: ProbeAttempt = {
-    name: source === "react-boundary" ? "react-render" : "runtime",
+    name: "react-render",
     target: "app",
     ok: false,
     durationMs: 0,
@@ -182,7 +181,7 @@ export function buildCrashReport(error: unknown, source: "react-boundary" | "glo
   }
   return {
     classification: "unknown",
-    summary: `App crashed (${source}): ${err.message}`,
+    summary: `App crashed (react-boundary): ${err.message}`,
     url: "",
     isHostname: false,
     attempts: [attempt],

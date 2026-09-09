@@ -357,7 +357,7 @@
   },
   "errorBoundary": {
     "title": "Something went wrong",
-    "subtitle": "The app hit an unexpected error. It has been reported automatically. You can share a detailed report to help us fix it faster.",
+    "subtitle": "The app hit an unexpected error. You can share a detailed report to help us fix it faster.",
     "errorLabel": "Error",
     "unknownError": "Unknown error",
     "stackLabel": "Stack",

@@ -38,7 +38,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   handleShare = () => {
     const { error } = this.state
     if (!error) return
-    const report = buildCrashReport(error, "react-boundary")
+    const report = buildCrashReport(error)
     shareReport(report).catch((e) => log.warn("boundary", "share failed", String(e)))
   }
 

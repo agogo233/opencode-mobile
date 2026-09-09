@@ -357,7 +357,7 @@
   },
   "errorBoundary": {
     "title": "出现了一些问题",
-    "subtitle": "应用遇到了一个意外错误，已自动上报。您可以分享详细报告以帮助我们更快修复。",
+    "subtitle": "应用遇到了一个意外错误。您可以分享详细报告以帮助我们更快修复。",
     "errorLabel": "错误",
     "unknownError": "未知错误",
     "stackLabel": "堆栈",
