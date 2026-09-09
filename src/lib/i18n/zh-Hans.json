@@ -255,6 +255,11 @@
   },
   "sessionsList": {
     "untitledSession": "未命名会话",
+    "active": {
+      "needsAttention": "等待你的回复",
+      "retrying": "正在重试（第 {{attempt}} 次）...",
+      "working": "处理中..."
+    },
     "time": {
       "justNow": "刚刚",
       "minutesAgo": "{{count}} 分钟前",

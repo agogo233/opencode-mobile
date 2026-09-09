@@ -473,6 +473,11 @@ export const useEvents = create<EventsState>((set, get) => ({
     controller = null
     erroredSessions.clear()
     abortedSessions.clear()
+    // `sending` lives in the sessions store but is equally SSE-sourced: with
+    // sessionStatus cleared here, a leftover optimistic flag would render a
+    // phantom busy row in the active-first sessions list until the next
+    // selectSession resets it.
+    useSessions.setState({ sending: {} })
     set({
       connected: false,
       authError: false,

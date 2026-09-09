@@ -255,6 +255,11 @@
   },
   "sessionsList": {
     "untitledSession": "Untitled Session",
+    "active": {
+      "needsAttention": "Waiting for your reply",
+      "retrying": "Retrying (attempt {{attempt}})...",
+      "working": "Working..."
+    },
     "time": {
       "justNow": "Just now",
       "minutesAgo": "{{count}}m ago",

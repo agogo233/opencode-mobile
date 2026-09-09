@@ -27,6 +27,7 @@ import type BottomSheet from "@gorhom/bottom-sheet"
 import type { Session, Project } from "../../src/lib/sdk"
 import { DirectorySwitcher, DirectoryBrowserSheet } from "../../src/components/chat"
 import { groupByDirectory } from "../../src/lib/session-grouping"
+import { isActive, orderActiveFirst, type ActivitySignals } from "../../src/lib/session-active"
 import { nameOf } from "../../src/lib/path-utils"
 import { SETUP_GUIDE_URL } from "../../src/lib/links"
 
@@ -55,6 +56,26 @@ function SessionItem({
   onDelete: () => void
 }) {
   const { t } = useTranslation()
+
+  // Fine-grained, row-level subscriptions. statusText updates at streaming
+  // frequency (every message.part.updated while running), so it is read ONLY
+  // here — the list screen itself must never subscribe to it (each event
+  // would otherwise re-render every row).
+  const status = useEvents((s) => s.sessionStatus[session.id])
+  const statusText = useEvents((s) => s.statusText[session.id])
+  const sending = useSessions((s) => s.sending[session.id])
+  const pending = useEvents(
+    (s) => (s.permissions[session.id]?.length ?? 0) + (s.questions[session.id]?.length ?? 0),
+  )
+
+  const active = isActive({ status, sending, pending })
+  const dotColor = pending > 0 ? "#f59e0b" : status?.type === "retry" ? "#ef4444" : "#8b5cf6"
+  const statusLabel =
+    pending > 0
+      ? t("sessionsList.active.needsAttention")
+      : status?.type === "retry"
+        ? t("sessionsList.active.retrying", { attempt: status.attempt })
+        : statusText || t("sessionsList.active.working")
 
   const onPress = () => {
     router.push({
@@ -86,16 +107,28 @@ function SessionItem({
           <Text style={[styles.sessionTitle, isDark && styles.textDark]} numberOfLines={1}>
             {session.title || t("sessionsList.untitledSession")}
           </Text>
+          {active && (
+            <View
+              style={[styles.activeDot, { backgroundColor: dotColor }]}
+              testID={`session-active-dot-${session.id}`}
+            />
+          )}
         </View>
         <View style={styles.sessionMetaRow}>
-          <Text style={[styles.sessionMeta, isDark && styles.metaDark]}>
-            {formatTime(session.time.updated, t)}
-            {/* summary is always present but files defaults to 0 until the
-                server populates it — only show the count when it's meaningful,
-                matching the SessionInfo panel's `summary.files > 0` guard (#55) */}
-            {session.summary && session.summary.files > 0 &&
-              ` · ${t("sessionsList.filesCount", { count: session.summary.files })}`}
-          </Text>
+          {active ? (
+            <Text style={[styles.sessionStatusText, isDark && styles.sessionStatusTextDark]} numberOfLines={1}>
+              {statusLabel}
+            </Text>
+          ) : (
+            <Text style={[styles.sessionMeta, isDark && styles.metaDark]}>
+              {formatTime(session.time.updated, t)}
+              {/* summary is always present but files defaults to 0 until the
+                  server populates it — only show the count when it's meaningful,
+                  matching the SessionInfo panel's `summary.files > 0` guard (#55) */}
+              {session.summary && session.summary.files > 0 &&
+                ` · ${t("sessionsList.filesCount", { count: session.summary.files })}`}
+            </Text>
+          )}
           {shortDir && (
             <View style={styles.sessionDirBadge}>
               <Ionicons name="folder-outline" size={12} color={isDark ? "#888888" : "#666666"} />
@@ -172,7 +205,7 @@ export default function SessionsScreen() {
   const creatingInFlight = useRef(false)
   const [serverProjects, setServerProjects] = useState<Project[]>([])
 
-  const { sessions, isLoading, error, loadSessions, createSession, deleteSession } = useSessions()
+  const { sessions, isLoading, error, sending, loadSessions, createSession, deleteSession } = useSessions()
   const {
     activeConnection,
     client,
@@ -186,6 +219,14 @@ export default function SessionsScreen() {
   } = useConnections()
   const authError = useEvents((s) => s.authError)
   const reconnect = useEvents((s) => s.connect)
+  // Whole-record selectors with stable references (zustand v5: a selector
+  // that builds a new object every call would re-render forever). These
+  // records change only on session.status / permission / question events —
+  // low frequency. statusText is deliberately NOT read here (it changes on
+  // every streamed part; SessionItem subscribes to it per-row instead).
+  const sessionStatus = useEvents((s) => s.sessionStatus)
+  const pendingPermissions = useEvents((s) => s.permissions)
+  const pendingQuestions = useEvents((s) => s.questions)
   const loadCatalog = useCatalog((s) => s.load)
   const dirSheetRef = useRef<BottomSheet>(null)
   const browserSheetRef = useRef<BottomSheet>(null)
@@ -207,12 +248,26 @@ export default function SessionsScreen() {
     })
   }, [])
 
-  // Flatten sessions into header+item rows. Skip headers entirely when
-  // everything lives in one directory — a lone header adds noise, not clarity.
+  const activityOf = useCallback(
+    (id: string): ActivitySignals => ({
+      status: sessionStatus[id],
+      sending: sending[id],
+      pending: (pendingPermissions[id]?.length ?? 0) + (pendingQuestions[id]?.length ?? 0),
+    }),
+    [sessionStatus, sending, pendingPermissions, pendingQuestions],
+  )
+
+  // Flatten sessions into header+item rows. Active sessions (running, retrying,
+  // or waiting for a permission/question answer) float to the top first — the
+  // sort runs BEFORE grouping, and groupByDirectory preserves input order, so
+  // active rows lead both the overall list (via first-seen group order) and
+  // their own group. Skip headers entirely when everything lives in one
+  // directory — a lone header adds noise, not clarity.
   const rows = useMemo<ListRow[]>(() => {
-    const groups = groupByDirectory(sessions)
+    const ordered = orderActiveFirst(sessions, activityOf)
+    const groups = groupByDirectory(ordered)
     if (groups.length <= 1) {
-      return sessions.map((session) => ({ type: "session", session }))
+      return ordered.map((session) => ({ type: "session", session }))
     }
     const out: ListRow[] = []
     for (const group of groups) {
@@ -229,7 +284,7 @@ export default function SessionsScreen() {
       }
     }
     return out
-  }, [sessions, collapsedDirs])
+  }, [sessions, collapsedDirs, activityOf])
 
   // Fetch server-known projects when the new session modal opens
   useEffect(() => {
@@ -979,6 +1034,9 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     color: "#0a0a0a",
     marginBottom: 4,
+    // Long titles must shrink so the active-status dot next to them is never
+    // pushed off-screen.
+    flexShrink: 1,
   },
   textDark: {
     color: "#ffffff",
@@ -986,6 +1044,23 @@ const styles = StyleSheet.create({
   sessionMeta: {
     fontSize: 13,
     color: "#666666",
+  },
+  activeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    // Optical alignment with the title baseline: sessionTitle has
+    // marginBottom 4, so a simple alignSelf:"center" sits low.
+    marginTop: 7,
+  },
+  sessionStatusText: {
+    fontSize: 13,
+    color: "#6d28d9",
+    fontWeight: "500",
+    flex: 1,
+  },
+  sessionStatusTextDark: {
+    color: "#a78bfa",
   },
   sessionMetaRow: {
     flexDirection: "row",
