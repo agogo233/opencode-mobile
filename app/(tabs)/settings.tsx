@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import {
   View,
   Text,
@@ -22,8 +22,12 @@ import {
 } from "../../src/lib/notifications"
 import type { Category } from "../../src/lib/notifications"
 import { PRIVACY_POLICY_URL } from "../../src/lib/links"
-import { CURRENT_VERSION, checkForUpdate, type AvailableUpdate } from "../../src/lib/update-check"
+import appJson from "../../app.json"
 import type { LocalePreference } from "../../src/lib/i18n/locale-resolve"
+
+// app.json is the single source of the user-visible version (package.json/gradle
+// are kept in parity by `npm run check:versions`).
+const CURRENT_VERSION = (appJson as { expo?: { version?: string } }).expo?.version ?? "unknown"
 
 function SettingRow({
   icon,
@@ -77,23 +81,6 @@ export default function SettingsScreen() {
   const { settings, hasBiometrics, updateSettings, lock } = useAuth()
   const { notifications, setNotification, locale, setLocale } = useSettings()
   const [osGranted, setOsGranted] = useState<boolean | null>(null)
-
-  // Settings is where a user goes to ask "what am I running?". Answer it, and if
-  // a newer build exists say so here too — the banner on the sessions list is
-  // dismissible, this row is not (AGE-110). Uses the same 24h-throttled check,
-  // so opening Settings repeatedly costs no extra requests.
-  const [updateAvailable, setUpdateAvailable] = useState<AvailableUpdate | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    checkForUpdate({ ignoreDismissed: true })
-      .then((result) => {
-        if (!cancelled) setUpdateAvailable(result)
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   // Check OS permission state on first toggle attempt
   const handleToggle = useCallback(
@@ -232,21 +219,10 @@ export default function SettingsScreen() {
         <SettingRow
           icon="information-circle"
           label={t("settings.about.version")}
-          // Was hard-coded "1.0.0" — wrong for every build ever shipped, and the
-          // one place a user could have checked what they are running while 64%
-          // of the base sat on a four-week-old build (AGE-110).
-          description={
-            updateAvailable
-              ? `${CURRENT_VERSION} → ${updateAvailable.version}`
-              : `${CURRENT_VERSION} · ${t("update.upToDate")}`
-          }
+          // Was hard-coded "1.0.0" — wrong for every build ever shipped, and
+          // the one place a user could have checked what they are running.
+          description={CURRENT_VERSION}
           isDark={isDark}
-          onPress={updateAvailable ? () => Linking.openURL(updateAvailable.url) : undefined}
-          right={
-            updateAvailable ? (
-              <Ionicons name="arrow-up-circle" size={20} color={isDark ? "#7dd3fc" : "#0369a1"} />
-            ) : undefined
-          }
         />
         <SettingRow
           icon="logo-github"
