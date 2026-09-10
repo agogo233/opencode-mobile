@@ -16,6 +16,7 @@ interface Props {
   onLoadAll: () => void
   onScrollToTop: () => void
   onClose: () => void
+  onBrowseFiles?: () => void
 }
 
 function compact(n: number): string {
@@ -51,6 +52,7 @@ export function SessionInfo({
   onLoadAll,
   onScrollToTop,
   onClose,
+  onBrowseFiles,
 }: Props) {
   const { t, i18n } = useTranslation()
   // Match TUI: last assistant message tokens (context window), cumulative cost
@@ -195,6 +197,12 @@ export function SessionInfo({
           <TouchableOpacity style={[s.action, isDark && s.actionDark]} onPress={onScrollToTop}>
             <Ionicons name="arrow-up-outline" size={14} color={isDark ? "#888888" : "#666666"} />
             <Text style={[s.actionText, isDark && s.dimDark]}>{t("chat.sessionInfo.jumpToBeginning")}</Text>
+          </TouchableOpacity>
+        )}
+        {onBrowseFiles && (
+          <TouchableOpacity style={[s.action, isDark && s.actionDark]} onPress={onBrowseFiles} testID="session-browse-files">
+            <Ionicons name="folder-open-outline" size={14} color={isDark ? "#888888" : "#666666"} />
+            <Text style={[s.actionText, isDark && s.dimDark]}>{t("chat.sessionInfo.browseFiles")}</Text>
           </TouchableOpacity>
         )}
       </View>

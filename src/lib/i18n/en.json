@@ -408,6 +408,15 @@
       "title": "Select Model",
       "searchPlaceholder": "Search models..."
     },
+    "agentPicker": {
+      "title": "Select Agent",
+      "empty": "No agents available"
+    },
+    "mentionPopover": {
+      "searching": "Searching files...",
+      "empty": "No matching files",
+      "noConnection": "No active connection"
+    },
     "variantPicker": {
       "title": "Reasoning Effort",
       "autoLabel": "Auto",
@@ -463,6 +472,7 @@
         "shared": "Shared",
         "yes": "Yes"
       },
+      "browseFiles": "Browse project files",
       "time": {
         "justNow": "just now",
         "minutesAgo": "{{count}}m ago",
@@ -470,6 +480,19 @@
         "daysAgo": "{{count}}d ago"
       }
     }
+  },
+  "fileBrowser": {
+    "title": "Files",
+    "noConnection": "No active connection",
+    "listFailed": "Failed to list directory",
+    "empty": "No files here",
+    "up": "Up one level"
+  },
+  "filePreview": {
+    "title": "File",
+    "readFailed": "Failed to read file",
+    "unsupported": "Preview not available for this file type",
+    "truncated": "File too large to preview fully"
   },
   "demo": {
     "title": "Demo",

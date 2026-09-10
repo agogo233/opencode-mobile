@@ -152,6 +152,8 @@ function RootLayout() {
                   presentation: "modal",
                 }}
               />
+              <Stack.Screen name="file-browser" options={{ title: t("fileBrowser.title") }} />
+              <Stack.Screen name="file-preview" options={{ title: t("filePreview.title") }} />
             </Stack>
               <StatusBar style={isDark ? "light" : "dark"} />
             </AuthGate>

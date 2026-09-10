@@ -5,13 +5,12 @@ import { useTranslation } from "react-i18next"
 import { Markdown } from "../markdown"
 import { ToolCallCard } from "./ToolCallCard"
 import { ReasoningBlock } from "./ReasoningBlock"
+import { FileAttachmentChip } from "./FileAttachmentChip"
+import { isDeviceLoadableImage } from "../../lib/file-mime"
+import { nameOf } from "../../lib/path-utils"
 import type { Message, Part } from "../../lib/sdk"
 
 const SCREEN_WIDTH = Dimensions.get("window").width
-
-function isImageMime(mime?: string): boolean {
-  return !!mime && mime.startsWith("image/")
-}
 
 interface Props {
   message: Message
@@ -33,7 +32,9 @@ export const MessageBubble = memo(
     const textParts = parts.filter((p) => p.type === "text")
     const reasoningParts = parts.filter((p) => p.type === "reasoning")
     const toolParts = parts.filter((p) => p.type === "tool")
-    const fileParts = parts.filter((p) => p.type === "file" && isImageMime(p.mime))
+    // file:// references can't be decoded on-device — render them as chips.
+    const imageParts = parts.filter((p) => p.type === "file" && isDeviceLoadableImage(p))
+    const fileParts = parts.filter((p) => p.type === "file" && !isDeviceLoadableImage(p))
     const text = textParts.map((p) => p.text).join("\n") || ""
     const reasoning = reasoningParts.map((p) => p.text).join("\n") || ""
 
@@ -63,14 +64,14 @@ export const MessageBubble = memo(
         </View>
 
         {/* Image attachments */}
-        {fileParts.length > 0 && (
+        {imageParts.length > 0 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={s.imageRow}
             style={s.imageScroll}
           >
-            {fileParts.map((fp) => (
+            {imageParts.map((fp) => (
               <View key={fp.id} style={s.imageWrap}>
                 <Image source={{ uri: fp.url }} style={s.attachedImage} resizeMode="cover" />
                 {fp.filename && (
@@ -81,6 +82,15 @@ export const MessageBubble = memo(
               </View>
             ))}
           </ScrollView>
+        )}
+
+        {/* Non-image file references (workspace files mentioned via @) */}
+        {fileParts.length > 0 && (
+          <View style={s.fileRow}>
+            {fileParts.map((fp) => (
+              <FileAttachmentChip key={fp.id} filename={fp.filename || nameOf(fp.url || "")} isDark={isDark} />
+            ))}
+          </View>
         )}
 
         {/* Reasoning (collapsible) */}
@@ -163,6 +173,12 @@ const s = StyleSheet.create({
   // Images
   imageScroll: { marginBottom: 8 },
   imageRow: { gap: 8 },
+  fileRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
   imageWrap: { alignItems: "center" },
   attachedImage: {
     width: Math.min(200, SCREEN_WIDTH * 0.5),

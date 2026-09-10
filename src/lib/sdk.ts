@@ -163,6 +163,21 @@ export interface FileEntry {
   ignored: boolean
 }
 
+export interface FileContent {
+  type: "text" | "binary"
+  content: string
+  diff?: string
+  encoding?: string
+  mimeType?: string
+}
+
+export interface GitFileStatus {
+  path: string
+  added: number
+  removed: number
+  status: "added" | "deleted" | "modified"
+}
+
 export interface Event {
   type: string
   properties: Record<string, unknown>
@@ -321,6 +336,47 @@ export function createClient(config: ClientConfig) {
       list: (params: { path?: string } = {}) => {
         const query = new URLSearchParams({ path: params.path ?? "." })
         return request<FileEntry[]>(config, `/file?${query.toString()}`)
+      },
+      // Read a file's content, scoped to this client's directory. `path`
+      // may be relative to the directory or absolute; text comes back as
+      // `type: "text"`, images/binary as `type: "binary"` with base64
+      // `content` and a `mimeType`. Older servers without /file/content
+      // answer 404 — callers should treat ApiError(404) as "unsupported".
+      read: (params: { path: string }) => {
+        const query = new URLSearchParams({ path: params.path })
+        if (config.directory) query.set("directory", config.directory)
+        return request<FileContent>(config, `/file/content?${query.toString()}`)
+      },
+      // Search file names inside this client's directory (server-side
+      // ripgrep-style lookup). Resolves to [] on servers without
+      // /find/file (ApiError(404) is swallowed so @-mentions degrade to
+      // "no results" instead of an error state); other errors throw.
+      searchFiles: async (params: { query: string; limit?: number }): Promise<string[]> => {
+        const q = new URLSearchParams({ query: params.query, type: "file" })
+        if (params.limit) q.set("limit", String(params.limit))
+        if (config.directory) q.set("directory", config.directory)
+        try {
+          return await request<string[]>(config, `/find/file?${q.toString()}`)
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) return []
+          throw err
+        }
+      },
+      // Git status of the working tree: one entry per changed file with
+      // +/− line counts. Paths are relative to this client's directory.
+      // Resolves to null on servers that don't expose GET /file/status
+      // (older opencode builds) so the browser can skip the status dots
+      // without crashing; other errors propagate like any other request.
+      status: async (): Promise<GitFileStatus[] | null> => {
+        try {
+          const q = new URLSearchParams()
+          if (config.directory) q.set("directory", config.directory)
+          const qs = q.toString()
+          return await request<GitFileStatus[]>(config, qs ? `/file/status?${qs}` : "/file/status")
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) return null
+          throw err
+        }
       },
       // Enumerate the server's filesystem roots (mounted drives, home dir)
       // to seed the directory browser's pinned top-level entries. Resolves

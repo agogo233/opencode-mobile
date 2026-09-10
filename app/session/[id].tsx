@@ -26,12 +26,15 @@ import {
   QuestionPrompt,
   StatusIndicator,
   SlashPopover,
+  MentionPopover,
   ModelPicker,
+  AgentPicker,
   VariantPicker,
   ImageAttachments,
   SessionInfo,
   type SlashCommand,
   type Attachment,
+  type MentionItem,
 } from "../../src/components/chat"
 import { useSessions } from "../../src/stores/sessions"
 import { useEvents, refreshPending } from "../../src/stores/events"
@@ -39,6 +42,9 @@ import { useConnections } from "../../src/stores/connections"
 import { useAuth } from "../../src/stores/auth"
 import { useCatalog } from "../../src/stores/catalog"
 import { useSpeech } from "../../src/lib/speech"
+import { detectMentionTrigger, toFileUrl, resolveAbsPath } from "../../src/lib/mention"
+import { mimeForPath } from "../../src/lib/file-mime"
+import { nameOf } from "../../src/lib/path-utils"
 
 // --- Builtin slash commands ---
 function builtinCommands(t: (key: string) => string): SlashCommand[] {
@@ -83,6 +89,7 @@ export default function SessionScreen() {
 
   const flatListRef = useRef<FlatList>(null)
   const modelSheetRef = useRef<BottomSheet>(null)
+  const agentSheetRef = useRef<BottomSheet>(null)
   const variantSheetRef = useRef<BottomSheet>(null)
   const creatingInFlight = useRef(false)
   const [input, setInput] = useState("")
@@ -109,7 +116,7 @@ export default function SessionScreen() {
   const isSending = useSessions((s) => !!(currentSession && s.sending[currentSession.id]))
 
   const { authenticateForMessage } = useAuth()
-  const { client, clientForDirectory } = useConnections()
+  const { client, clientForDirectory, activeConnection, currentProject, serverHome } = useConnections()
 
   // Use directory-aware client for sessions that belong to a project other than the active one
   const sessionClient = useMemo(
@@ -136,6 +143,12 @@ export default function SessionScreen() {
 
   const shortDir = getShortDir(currentSession?.directory)
   const [showScrollButton, setShowScrollButton] = useState(false)
+
+  // Root for the "Browse project files" entry: the session's project first,
+  // then the connection's directory, the server project, and the server
+  // home — hide the entry when none is known.
+  const browseRootDir =
+    currentSession?.directory || activeConnection?.directory || currentProject?.path?.absolute || serverHome || null
 
   // SSE reconnect banner
   const reconnectAttempts = useEvents((s) => s.reconnectAttempts)
@@ -171,6 +184,97 @@ export default function SessionScreen() {
     }))
     return [...custom, ...builtinCommands(t)]
   }, [serverCommands, i18n.language])
+
+  // --- @-mention (workspace file reference) ---
+  const [caretPos, setCaretPos] = useState(0)
+  const [mentionResults, setMentionResults] = useState<MentionItem[]>([])
+  const [mentionSearching, setMentionSearching] = useState(false)
+
+  // Root directory the mention search is scoped to: session project first,
+  // then the active connection's directory, then the server's current project.
+  const rootDir = currentSession?.directory || activeConnection?.directory || currentProject?.path?.absolute || null
+
+  // clientForDirectory builds a fresh client on every call (not stable), so
+  // memoize the per-directory lookup and keep it in a ref for the search
+  // effect below.
+  const mentionClient = useMemo(
+    () => (rootDir ? clientForDirectory(rootDir) ?? client : client),
+    [rootDir, clientForDirectory, client],
+  )
+  const getMentionClient = useCallback(() => mentionClient, [mentionClient])
+
+  const mention = useMemo(() => detectMentionTrigger(input, caretPos), [input, caretPos])
+  const mentionOpen = !!(mention && mention.query.length > 0 && mentionClient)
+  // Key the search effect on the query text so mere caret moves inside the
+  // same mention don't re-fire the request.
+  const mentionQuery = mention?.query
+
+  useEffect(() => {
+    if (!mentionOpen || !mentionQuery) return
+    const effectClient = getMentionClient()
+    if (!effectClient) return
+    let cancel = false
+    const timer = setTimeout(() => {
+      effectClient
+        .file.searchFiles({ query: mentionQuery, limit: 20 })
+        .then((paths) => {
+          if (cancel) return
+          // /find/file may return directory entries (a trailing "/" marks
+          // them) and may ignore the limit param on some server builds,
+          // so filter and cap client-side.
+          setMentionResults(
+            paths
+              .filter((p) => !p.endsWith("/"))
+              .slice(0, 20)
+              .map((p) => ({
+                name: nameOf(p),
+                relativePath: p,
+                absolutePath: rootDir ? resolveAbsPath(p, rootDir) : p,
+              })),
+          )
+        })
+        .catch(() => {
+          if (cancel) return
+          setMentionResults([])
+        })
+        .finally(() => {
+          if (!cancel) setMentionSearching(false)
+        })
+    }, 200)
+    setMentionSearching(true)
+    setMentionResults([])
+    return () => {
+      cancel = true
+      clearTimeout(timer)
+    }
+  }, [mentionOpen, mentionQuery, getMentionClient, rootDir])
+
+  // Clear the stale searching flag whenever the popover is dismissed so
+  // it doesn't linger into the next mention session.
+  useEffect(() => {
+    if (!mentionOpen) setMentionSearching(false)
+  }, [mentionOpen])
+
+  const handleMentionSelect = useCallback(
+    (item: MentionItem) => {
+      const trig = detectMentionTrigger(input, caretPos)
+      if (trig) {
+        setInput(input.slice(0, trig.startIndex) + input.slice(trig.startIndex + 1 + trig.query.length))
+      }
+      setMentionResults([])
+      setMentionSearching(false)
+      setAttachments((prev) => [
+        ...prev,
+        {
+          uri: toFileUrl(item.absolutePath),
+          mime: mimeForPath(item.name),
+          filename: item.relativePath,
+        },
+      ])
+      setCaretPos(Math.max(0, caretPos - (trig ? 1 + trig.query.length : 0)))
+    },
+    [input, caretPos],
+  )
 
   // While a revert is pending, the reverted message and everything after it
   // still exist server-side (cleanup only runs on the next prompt/unrevert)
@@ -651,6 +755,15 @@ export default function SessionScreen() {
             flatListRef.current?.scrollToEnd({ animated: true })
           }}
           onClose={() => setShowInfo(false)}
+          onBrowseFiles={
+            browseRootDir
+              ? () =>
+                  router.push({
+                    pathname: "/file-browser",
+                    params: { fallback: browseRootDir },
+                  })
+              : undefined
+          }
         />
 
         {/* SSE reconnect/connected banner */}
@@ -762,8 +875,19 @@ export default function SessionScreen() {
           />
         ))}
 
+        {/* Mention popover (workspace file reference) */}
+        {mentionOpen && mention && (
+          <MentionPopover
+            items={mentionResults}
+            searching={mentionSearching}
+            noConnection={!rootDir}
+            isDark={isDark}
+            onSelect={handleMentionSelect}
+          />
+        )}
+
         {/* Slash popover */}
-        {slashActive && (
+        {!mentionOpen && slashActive && (
           <SlashPopover query={slashQuery} commands={allCommands} isDark={isDark} onSelect={handleSlashSelect} />
         )}
 
@@ -771,8 +895,9 @@ export default function SessionScreen() {
         <View style={[s.toolbar, isDark && s.toolbarDark]}>
           <TouchableOpacity
             style={[s.agentChip, { borderColor: agentColor }]}
-            onPress={() => cycleAgent()}
+            onPress={() => agentSheetRef.current?.expand()}
             onLongPress={() => cycleAgent(-1)}
+            testID="agent-chip"
           >
             <View style={[s.agentDot, { backgroundColor: agentColor }]} />
             <Text style={[s.agentLabel, isDark && s.textWhite]}>{agent || "build"}</Text>
@@ -834,6 +959,13 @@ export default function SessionScreen() {
               placeholderTextColor={speech.listening ? "#ef4444" : isDark ? "#666666" : "#999999"}
               value={speech.listening ? speech.transcript : input}
               onChangeText={speech.listening ? undefined : setInput}
+              onSelectionChange={
+                speech.listening
+                  ? undefined
+                  : (e) => {
+                      setCaretPos(e.nativeEvent.selection.start)
+                    }
+              }
               editable={!speech.listening}
               multiline
               maxLength={10000}
@@ -874,6 +1006,16 @@ export default function SessionScreen() {
         selected={model}
         isDark={isDark}
         onSelect={handleModelSelect}
+      />
+
+      {/* Agent picker bottom sheet — subagents are excluded: they can't be
+          the session's primary agent (cycleAgent only cycles primary/all). */}
+      <AgentPicker
+        sheetRef={agentSheetRef}
+        agents={agents.filter((a) => a.mode !== "subagent")}
+        selected={agent}
+        isDark={isDark}
+        onSelect={catalog.setAgent}
       />
 
       {/* Reasoning effort (variant) picker bottom sheet */}

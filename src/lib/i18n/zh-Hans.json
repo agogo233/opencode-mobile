@@ -408,6 +408,15 @@
       "title": "选择模型",
       "searchPlaceholder": "搜索模型..."
     },
+    "agentPicker": {
+      "title": "选择代理",
+      "empty": "没有可用代理"
+    },
+    "mentionPopover": {
+      "searching": "正在搜索文件...",
+      "empty": "没有匹配的文件",
+      "noConnection": "没有活动连接"
+    },
     "variantPicker": {
       "title": "推理强度",
       "autoLabel": "自动",
@@ -463,6 +472,7 @@
         "shared": "已分享",
         "yes": "是"
       },
+      "browseFiles": "浏览项目文件",
       "time": {
         "justNow": "刚刚",
         "minutesAgo": "{{count}} 分钟前",
@@ -470,6 +480,19 @@
         "daysAgo": "{{count}} 天前"
       }
     }
+  },
+  "fileBrowser": {
+    "title": "文件",
+    "noConnection": "没有活动连接",
+    "listFailed": "无法列出目录",
+    "empty": "此处没有文件",
+    "up": "返回上一级"
+  },
+  "filePreview": {
+    "title": "文件",
+    "readFailed": "无法读取文件",
+    "unsupported": "此文件类型不支持预览",
+    "truncated": "文件过大，预览已截断"
   },
   "demo": {
     "title": "演示",

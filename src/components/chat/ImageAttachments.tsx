@@ -1,5 +1,8 @@
 import { View, Text, Image, TouchableOpacity, StyleSheet, ScrollView } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { FileAttachmentChip } from "./FileAttachmentChip"
+import { isDeviceLoadableImage } from "../../lib/file-mime"
+import { nameOf } from "../../lib/path-utils"
 
 export interface Attachment {
   uri: string
@@ -22,19 +25,28 @@ export function ImageAttachments({ attachments, isDark, onRemove }: Props) {
   return (
     <View style={[s.container, isDark && s.containerDark]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.scroll}>
-        {attachments.map((att, idx) => (
-          <View key={`${att.uri}-${idx}`} style={s.thumb}>
-            <Image source={{ uri: att.uri }} style={s.image} resizeMode="cover" />
-            <TouchableOpacity style={[s.remove, isDark && s.removeDark]} onPress={() => onRemove(idx)}>
-              <Ionicons name="close" size={14} color="#ffffff" />
-            </TouchableOpacity>
-            {att.filename && (
-              <Text style={[s.label, isDark && s.labelDark]} numberOfLines={1}>
-                {att.filename}
-              </Text>
-            )}
-          </View>
-        ))}
+        {attachments.map((att, idx) =>
+          isDeviceLoadableImage(att) ? (
+            <View key={`${att.uri}-${idx}`} style={s.thumb}>
+              <Image source={{ uri: att.uri }} style={s.image} resizeMode="cover" />
+              <TouchableOpacity style={[s.remove, isDark && s.removeDark]} onPress={() => onRemove(idx)}>
+                <Ionicons name="close" size={14} color="#ffffff" />
+              </TouchableOpacity>
+              {att.filename && (
+                <Text style={[s.label, isDark && s.labelDark]} numberOfLines={1}>
+                  {att.filename}
+                </Text>
+              )}
+            </View>
+          ) : (
+            <FileAttachmentChip
+              key={`${att.uri}-${idx}`}
+              filename={att.filename || nameOf(att.uri)}
+              isDark={isDark}
+              onRemove={() => onRemove(idx)}
+            />
+          ),
+        )}
       </ScrollView>
     </View>
   )
