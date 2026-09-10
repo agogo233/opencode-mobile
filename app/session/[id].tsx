@@ -84,6 +84,7 @@ export default function SessionScreen() {
   const flatListRef = useRef<FlatList>(null)
   const modelSheetRef = useRef<BottomSheet>(null)
   const variantSheetRef = useRef<BottomSheet>(null)
+  const creatingInFlight = useRef(false)
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [showInfo, setShowInfo] = useState(false)
@@ -98,6 +99,7 @@ export default function SessionScreen() {
     selectSession,
     sendMessage,
     abortSession,
+    createSession,
     loadOlderMessages,
     revertToMessage,
     unrevertSession,
@@ -555,6 +557,26 @@ export default function SessionScreen() {
     [setModel],
   )
 
+  // Create a fresh session in the connection's default directory — same flow
+  // as the sessions-list FAB (see app/(tabs)/index.tsx onCreateSession).
+  const handleNewSession = useCallback(async () => {
+    if (creatingInFlight.current) return
+    creatingInFlight.current = true
+    try {
+      const session = await createSession()
+      if (!session) {
+        Alert.alert(t("common.error"), t("sessionsList.alerts.createFailedMessage"))
+        return
+      }
+      router.push({
+        pathname: "/session/[id]",
+        params: { id: session.id, ...(session.directory ? { directory: session.directory } : {}) },
+      })
+    } finally {
+      creatingInFlight.current = false
+    }
+  }, [createSession, router, t])
+
   // Current agent display
   const currentAgent = agents.find((a) => a.name === agent)
   const agentColor = currentAgent?.color || "#8b5cf6"
@@ -581,6 +603,9 @@ export default function SessionScreen() {
                   <Text style={[s.dirText, isDark && s.dirTextDark]}>{shortDir}</Text>
                 </View>
               )}
+              <TouchableOpacity onPress={handleNewSession} hitSlop={8} testID="new-session-button">
+                <Ionicons name="add" size={24} color={isDark ? "#888888" : "#666666"} />
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => setShowInfo((v) => !v)} hitSlop={8}>
                 <Ionicons
                   name={showInfo ? "stats-chart" : "stats-chart-outline"}
