@@ -7,11 +7,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   useColorScheme,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   Alert,
 } from "react-native"
+import { KeyboardAvoidingView } from "react-native-keyboard-controller"
 import { useLocalSearchParams, Stack, useRouter, useFocusEffect } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"

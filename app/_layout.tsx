@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet"
 import { I18nextProvider, useTranslation } from "react-i18next"
+import { KeyboardProvider } from "react-native-keyboard-controller"
 import i18n from "../src/lib/i18n/config"
 import { useAuth } from "../src/stores/auth"
 import { useConnections } from "../src/stores/connections"
@@ -132,6 +133,7 @@ function RootLayout() {
     <ErrorBoundary>
       <I18nextProvider i18n={i18n}>
       <GestureHandlerRootView style={{ flex: 1 }}>
+        <KeyboardProvider>
         <BottomSheetModalProvider>
           <QueryClientProvider client={queryClient}>
             <AuthGate>
@@ -175,6 +177,7 @@ function RootLayout() {
             </AuthGate>
           </QueryClientProvider>
         </BottomSheetModalProvider>
+        </KeyboardProvider>
       </GestureHandlerRootView>
       </I18nextProvider>
     </ErrorBoundary>

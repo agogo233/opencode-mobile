@@ -5,13 +5,13 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   useColorScheme,
   ActivityIndicator,
   Alert,
 } from "react-native"
+import { KeyboardAvoidingView } from "react-native-keyboard-controller"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
