@@ -28,3 +28,6 @@ android/app/src/main/assets/index.android.bundle
 artifacts/screenshots/
 positive-S*.png
 negative-S*.png
+
+# opencode supervisor runtime traces (never tracked)
+.supervisor/

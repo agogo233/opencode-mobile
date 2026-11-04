@@ -8,6 +8,8 @@ import { recordSuccessfulSession } from "../lib/store-review"
 import { isAuthError } from "../lib/api-error"
 import { isSessionActuallyIdle } from "../lib/session-status-reconcile"
 import i18n from "../lib/i18n/config"
+import { AppState } from "react-native"
+import { mergePendingPermissions, normalizePendingPermission, normalizePermissionEvent, type PendingPermission } from "../lib/permissions"
 import type { Client, Part, Session, Message } from "../lib/sdk"
 
 // Session status from the server
@@ -27,17 +29,7 @@ interface EventsState {
   sessionStatus: Record<string, SessionStatus>
   statusText: Record<string, string>
   // Permissions & questions (pending per session)
-  permissions: Record<
-    string,
-    Array<{
-      id: string
-      sessionID: string
-      permission: string
-      patterns: string[]
-      metadata: Record<string, unknown>
-      tool?: { messageID: string; callID: string }
-    }>
-  >
+  permissions: Record<string, PendingPermission[]>
   questions: Record<
     string,
     Array<{
@@ -56,6 +48,11 @@ interface EventsState {
 
   connect: () => void
   disconnect: () => void
+  // Force an immediate reconnect + full resync, bypassing the backoff loop.
+  // Called when the app returns to the foreground: Android freezes JS timers
+  // and usually kills the SSE socket while backgrounded, so the backoff
+  // timers that were scheduled never ran and the stream is stale.
+  reconnectNow: () => void
 }
 
 let controller: AbortController | null = null
@@ -76,16 +73,46 @@ const PROLONGED_DISCONNECT_MS = 30_000
 // optimistic removals.
 export async function refreshPending(client: Client, sessionID: string) {
   try {
-    const [perms, questions] = await Promise.all([client.permission.list(), client.question.list()])
-    const sessionPerms = (perms || []).filter((p: Record<string, unknown>) => p.sessionID === sessionID)
+    // v2 permission/form lists are session-scoped — pass the session so
+    // pending prompts are found regardless of the server's active location.
+    const [perms, questions] = await Promise.all([client.permission.list(sessionID), client.question.list(sessionID)])
+    const sessionPerms = (perms || []).map(normalizePendingPermission).filter((p): p is PendingPermission => !!p && p.sessionID === sessionID)
     const sessionQuestions = (questions || []).filter((q: Record<string, unknown>) => q.sessionID === sessionID)
     useEvents.setState((state) => ({
-      permissions: { ...state.permissions, [sessionID]: sessionPerms as any },
+      permissions: { ...state.permissions, [sessionID]: mergePendingPermissions([], sessionPerms) },
       questions: { ...state.questions, [sessionID]: sessionQuestions as any },
     }))
   } catch (err) {
     console.warn("[Events] Failed to refresh pending:", err)
   }
+}
+
+async function refreshAllPending() {
+  const connectionState = useConnections.getState()
+  const clients = new Set<Client>()
+  if (connectionState.client) clients.add(connectionState.client)
+  for (const session of useSessions.getState().sessions) {
+    if (!session.directory) continue
+    const client = connectionState.clientForDirectory(session.directory)
+    if (client) clients.add(client)
+  }
+  await Promise.all([...clients].map(async (client) => {
+    try {
+      const pending = await client.permission.list()
+      const grouped = new Map<string, PendingPermission[]>()
+      for (const value of pending || []) {
+        const normalized = normalizePendingPermission(value)
+        if (normalized) grouped.set(normalized.sessionID, [...(grouped.get(normalized.sessionID) || []), normalized])
+      }
+      useEvents.setState((state) => {
+        const permissions = { ...state.permissions }
+        for (const [sessionID, items] of grouped) permissions[sessionID] = mergePendingPermissions(permissions[sessionID] || [], items)
+        return { permissions }
+      })
+    } catch (err) {
+      console.warn("[Events] Failed to reconcile pending permissions:", err)
+    }
+  }))
 }
 
 // Re-sync any session currently marked "busy" against the server after an
@@ -224,6 +251,7 @@ export const useEvents = create<EventsState>((set, get) => ({
           if (isReconnect && !resyncedAfterReconnect) {
             resyncedAfterReconnect = true
             void resyncBusySessions()
+            void refreshAllPending()
           }
 
           const payload = (event as any).payload || event
@@ -361,15 +389,16 @@ export const useEvents = create<EventsState>((set, get) => ({
               break
             }
 
-            case "permission.asked": {
-              const req = props as any
-              if (!req.id || !req.sessionID) break
+            case "permission.asked":
+            case "permission.v2.asked": {
+              const req = normalizePermissionEvent({ type, properties: props })
+              if (!req) break
               const existing = get().permissions[req.sessionID] || []
               if (existing.some((item) => item.id === req.id)) break
               set((state) => ({
                 permissions: {
                   ...state.permissions,
-                  [req.sessionID]: [...(state.permissions[req.sessionID] || []), req],
+                  [req.sessionID]: mergePendingPermissions(state.permissions[req.sessionID] || [], [req]),
                 },
               }))
               notify({
@@ -390,7 +419,8 @@ export const useEvents = create<EventsState>((set, get) => ({
               break
             }
 
-            case "permission.replied": {
+            case "permission.replied":
+            case "permission.v2.replied": {
               const sessionID = props.sessionID as string
               const requestID = props.requestID as string
               if (!sessionID || !requestID) break
@@ -463,6 +493,34 @@ export const useEvents = create<EventsState>((set, get) => ({
     })()
   },
 
+  reconnectNow: () => {
+    const connState = useConnections.getState()
+    if (!connState.client) return
+    console.log("[SSE] Foreground reconnect — re-establishing event stream")
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    controller?.abort()
+    controller = null
+    // Reset backoff state first: connect() gates its post-reconnect busy
+    // resync on reconnectAttempts > 0, and a foreground resume must resync
+    // even from a previously "stable" (but actually dead) connection — so we
+    // run the resync explicitly below instead.
+    set({ reconnectAttempts: 0, lastDisconnectAt: null })
+    get().connect()
+    void resyncBusySessions()
+    const sessions = useSessions.getState()
+    if (sessions.currentSession) {
+      sessions.refreshMessages()
+      const session = sessions.currentSession
+      const client = session.directory
+        ? connState.clientForDirectory(session.directory) ?? connState.client
+        : connState.client
+      if (client) void refreshPending(client, session.id)
+    }
+  },
+
   disconnect: () => {
     console.log("[SSE] Disconnecting")
     if (reconnectTimer) {
@@ -490,3 +548,7 @@ export const useEvents = create<EventsState>((set, get) => ({
     })
   },
 }))
+
+AppState.addEventListener("change", (state) => {
+  if (state === "active") void refreshAllPending()
+})
