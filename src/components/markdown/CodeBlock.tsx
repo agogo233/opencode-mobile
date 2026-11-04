@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { View, Text, TouchableOpacity, StyleSheet, useColorScheme, Platform } from "react-native"
 import * as Clipboard from "expo-clipboard"
 import { useTranslation } from "react-i18next"
@@ -20,8 +20,10 @@ export function CodeBlock({ code, language }: Props) {
   // The clipboard gets `code` — the raw string from the server — so what you
   // paste is byte-identical to what was sent, line breaks and all. Wrapping only
   // exists in the rendering. See ../../lib/scroll-config for why these blocks no
-  // longer scroll horizontally.
-  const lines = code.split("\n")
+  // longer scroll horizontally. Memoized on `code` so an unchanged block (the
+  // common case for every code block except the one actively streaming) reuses
+  // the same line array instead of re-splitting on each parent render.
+  const lines = useMemo(() => code.split("\n"), [code])
 
   const copy = async () => {
     try {

@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { useConnections } from "./connections"
-import { useSessions, abortedSessions } from "./sessions"
+import { useSessions, abortedSessions, scheduleRefreshMessages } from "./sessions"
 import { send as notify } from "../lib/notifications"
 import { sanitizeBody } from "../lib/notify-format"
 import { statusFromPart } from "../lib/status-labels"
@@ -162,7 +162,7 @@ async function resyncBusySessions() {
         }))
         useSessions.setState((state) => ({ sending: { ...state.sending, [sessionID]: false } }))
         if (useSessions.getState().currentSession?.id === sessionID) {
-          useSessions.getState().refreshMessages()
+          scheduleRefreshMessages()
         }
       } catch (err) {
         console.warn("[Events] Failed to resync session status for", sessionID, err)
@@ -288,7 +288,7 @@ export const useEvents = create<EventsState>((set, get) => ({
                 // Refresh messages if this is the session the user is viewing
                 const sessions = useSessions.getState()
                 if (sessions.currentSession?.id === sessionID) {
-                  sessions.refreshMessages()
+                  scheduleRefreshMessages()
                 }
               }
 
@@ -378,7 +378,7 @@ export const useEvents = create<EventsState>((set, get) => ({
                   : {}),
               }))
               if (useSessions.getState().currentSession?.id === sessionID) {
-                useSessions.getState().refreshMessages()
+                scheduleRefreshMessages()
               }
               notify({
                 category: "errors",
@@ -512,7 +512,7 @@ export const useEvents = create<EventsState>((set, get) => ({
     void resyncBusySessions()
     const sessions = useSessions.getState()
     if (sessions.currentSession) {
-      sessions.refreshMessages()
+      scheduleRefreshMessages()
       const session = sessions.currentSession
       const client = session.directory
         ? connState.clientForDirectory(session.directory) ?? connState.client

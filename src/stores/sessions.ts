@@ -4,6 +4,7 @@ import { useConnections } from "./connections"
 import { useSettings } from "./settings"
 import { extractPromptFromParts, type PromptFromParts } from "../lib/prompt-from-parts"
 import { mergeIncomingMessage } from "../lib/message-merge"
+import { mergeFull, mergePaged } from "../lib/message-diff-merge"
 import { isColdSessionLoad, isLiveEventForSession } from "../lib/session-load-reconcile"
 
 // Helper to convert API response to our internal format
@@ -156,16 +157,26 @@ export const useSessions = create<SessionsState>((set, get) => ({
       // stale result so it can't clobber the newer selection.
       if (seq !== selectSeq) return
 
-      // Parse the API response format: array of { info, parts }
-      const { messages, parts } = parseMessages(messagesResponse)
+      // A warm re-focus re-renders the same session, so merge the fresh page
+      // into what's already loaded (update + append, never delete — older
+      // messages live outside the page). A cold load replaces outright so no
+      // stale messages from a previous selection survive behind the spinner.
+      const { messages, parts } = isColdLoad
+        ? parseMessages(messagesResponse)
+        : mergePaged(get().messages, get().parts, messagesResponse)
 
       set({
         currentSession: session,
         messages,
         parts,
         isLoading: false,
-        // If we got exactly PAGE_SIZE messages, there are probably more
-        hasMore: messagesResponse.length >= pageSize(),
+        // A full page means there are probably more — but only for a cold load.
+        // A warm re-focus merges into history the user may have already fully
+        // loaded, and re-deriving from this page's length alone would resurrect
+        // the "load older" affordance they already exhausted.
+        hasMore: isColdLoad
+          ? messagesResponse.length >= pageSize()
+          : get().hasMore && messagesResponse.length >= pageSize(),
       })
     } catch (err) {
       if (seq !== selectSeq) return
@@ -185,16 +196,14 @@ export const useSessions = create<SessionsState>((set, get) => ({
 
       // Fetch ALL messages for this session
       const response = await client.session.messages(session.id)
-      const { messages: all, parts: allParts } = parseMessages(response)
-
-      // Merge: use all messages from full fetch, but keep any temp/optimistic messages
-      const existing = get().messages
-      const temp = existing.filter((m) => m.id.startsWith("temp-"))
-      const merged = [...all, ...temp]
+      // mergeFull keeps references for already-loaded messages (so the bubbles
+      // that were on screen don't re-render just because older history arrived)
+      // and preserves any temp/optimistic messages at the end.
+      const { messages, parts } = mergeFull(get().messages, get().parts, response)
 
       set({
-        messages: merged,
-        parts: { ...allParts, ...Object.fromEntries(temp.map((m) => [m.id, get().parts[m.id] || []])) },
+        messages,
+        parts,
         loadingMore: false,
         hasMore: false, // We loaded everything
       })
@@ -325,7 +334,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
         ...(stillCurrent ? { error: String(err) } : {}),
         sending: { ...state.sending, [session.id]: false },
       }))
-      if (stillCurrent) get().refreshMessages()
+      if (stillCurrent) scheduleRefreshMessages()
       throw err
     }
   },
@@ -353,7 +362,16 @@ export const useSessions = create<SessionsState>((set, get) => ({
 
     try {
       const response = await client.session.messages(session.id)
-      const { messages, parts } = parseMessages(response)
+      // A degenerate empty response (transient server hiccup, pagination edge)
+      // would tell mergeFull to delete every non-temp message and blank the
+      // chat on a mere foreground refresh. Skip rather than wipe — the next
+      // successful refresh reconciles for real.
+      if (!response?.length && get().messages.length > 0) return
+      // Merge against what's already rendered instead of replacing the whole
+      // table: unchanged messages keep their old references so the chat list
+      // only re-renders real updates, while a full timeline stays the authority
+      // for reconciling deletions missed while offline (message-diff-merge).
+      const { messages, parts } = mergeFull(get().messages, get().parts, response)
       set({ messages, parts })
     } catch (error) {
       set({ error: "errors.refreshMessages" })
@@ -478,3 +496,41 @@ export const useSessions = create<SessionsState>((set, get) => ({
     }
   },
 }))
+
+// Foreground resume fans several refresh triggers into a few hundred
+// milliseconds — the SSE reconnect (reconnectNow), the busy-session resync, a
+// session.status busy->idle landing, and a session.error. Each one used to fire
+// its own full-timeline fetch, so the app could issue 3-4 identical expensive
+// requests and replace the message table that many times on a single return to
+// the app — a big chunk of the "janky on foreground" feel.
+//
+// Coalesce them: at most one refresh runs per window, and if a fetch is already
+// in flight the window's calls collapse into a single trailing run so whatever
+// changed while it was fetching is still picked up (no lost final state).
+// Trailing-only keeps it to one request per window; the ~300ms delay is
+// imperceptible for a background resync (the on-screen session's live updates
+// come from SSE regardless).
+const REFRESH_COALESCE_MS = 300
+let refreshRunning = false
+let refreshQueued = false
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+export function scheduleRefreshMessages(): void {
+  if (refreshTimer || refreshRunning) {
+    refreshQueued = true
+    return
+  }
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    refreshQueued = false
+    refreshRunning = true
+    void Promise.resolve()
+      .then(() => useSessions.getState().refreshMessages())
+      .catch(() => {})
+      .then(() => {
+        refreshRunning = false
+        // Another window's worth of triggers landed while we were fetching.
+        if (refreshQueued) scheduleRefreshMessages()
+      })
+  }, REFRESH_COALESCE_MS)
+}

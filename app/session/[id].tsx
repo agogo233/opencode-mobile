@@ -47,6 +47,7 @@ import { detectMentionTrigger, toFileUrl, resolveAbsPath } from "../../src/lib/m
 import { mimeForPath } from "../../src/lib/file-mime"
 import { nameOf } from "../../src/lib/path-utils"
 import { messagePartsToSelectableText } from "../../src/lib/message-text"
+import type { Message, Part } from "../../src/lib/sdk"
 
 // --- Builtin slash commands ---
 function builtinCommands(t: (key: string) => string): SlashCommand[] {
@@ -390,6 +391,24 @@ export default function SessionScreen() {
   const scrollToBottom = useCallback((animated = true) => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated })
   }, [])
+
+  // Stable row renderer: a fresh closure per SessionScreen render would make
+  // FlatList rebuild every visible row's element on each render, even though
+  // MessageBubble's memo then bails on the unchanged rows. Keeping this
+  // referentially stable (its deps are all stable callbacks/primitives) lets
+  // the reference-preserving diff-merge actually pay off at the list level.
+  const renderMessage = useCallback(
+    ({ item }: { item: { message: Message; parts: Part[] } }) => (
+      <MessageBubble
+        message={item.message}
+        parts={item.parts}
+        isDark={isDark}
+        onSelectText={openSelectTextSheet}
+        onEdit={startEditFlow}
+      />
+    ),
+    [isDark, openSelectTextSheet, startEditFlow],
+  )
 
   // Re-select on every focus, not just mount. currentSession/messages/
   // permissions are a single global store, and the native stack keeps screens
@@ -846,20 +865,21 @@ export default function SessionScreen() {
               data={messageData}
               inverted
               keyExtractor={(item) => item.message.id}
-              renderItem={({ item }) => (
-                <MessageBubble
-                  message={item.message}
-                  parts={item.parts}
-                  isDark={isDark}
-                  onSelectText={openSelectTextSheet}
-                  onEdit={startEditFlow}
-                />
-              )}
+              renderItem={renderMessage}
               contentContainerStyle={s.messageList}
               onScroll={handleScroll}
               scrollEventThrottle={100}
               onEndReached={handleLoadMore}
               onEndReachedThreshold={0.5}
+              // Render-window tuning for long conversations: keep fewer
+              // off-screen rows mounted (windowSize) and amortize mounting work
+              // (maxToRenderPerBatch / updateCellsBatchingPeriod) so scrolling a
+              // large history and a foreground resume that mounts many rows at
+              // once don't stall the JS thread. initialNumToRender stays at the
+              // default since the newest page is what's on screen first.
+              windowSize={7}
+              maxToRenderPerBatch={8}
+              updateCellsBatchingPeriod={40}
               // Prevent jump when older messages are prepended
               maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               ListFooterComponent={
