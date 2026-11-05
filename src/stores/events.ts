@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { useConnections } from "./connections"
-import { useSessions, abortedSessions, scheduleRefreshMessages } from "./sessions"
+import { useSessions, abortedSessions, scheduleRefreshMessages, pageSize } from "./sessions"
+import { mergePaged } from "../lib/message-diff-merge"
 import { send as notify } from "../lib/notifications"
 import { sanitizeBody } from "../lib/notify-format"
 import { statusFromPart } from "../lib/status-labels"
@@ -147,9 +148,12 @@ async function resyncBusySessions() {
           : connState.client
         if (!client) return
 
-        const response = await client.session.messages(sessionID)
-        const messages = (response || []).map((m) => m.info)
-        if (!isSessionActuallyIdle(messages)) return // server says still busy - leave it alone
+        // Only the tail matters for the idle check, and a bounded page is all
+        // the merge below needs — fetching the whole timeline here would race
+        // the later foreground refresh and stall returning to the app.
+        const response = await client.session.messages(sessionID, { limit: Math.max(1, pageSize()) })
+        const info = (response || []).map((m) => m.info)
+        if (!isSessionActuallyIdle(info)) return // server says still busy - leave it alone
 
         // A fresh session.status event may have landed on the SSE stream
         // while this fetch was in flight — that's authoritative, don't
@@ -161,8 +165,16 @@ async function resyncBusySessions() {
           statusText: { ...state.statusText, [sessionID]: "" },
         }))
         useSessions.setState((state) => ({ sending: { ...state.sending, [sessionID]: false } }))
+        // This session is the one on screen — fold the page we already fetched
+        // in so the idle transition is reflected immediately rather than only
+        // after the coalesced refresh reconnectNow already scheduled. Non-current
+        // sessions have nothing to merge: their messages aren't held in the
+        // store anyway.
         if (useSessions.getState().currentSession?.id === sessionID) {
-          scheduleRefreshMessages()
+          useSessions.setState((state) => {
+            const { messages, parts } = mergePaged(state.messages, state.parts, response || [])
+            return { messages, parts }
+          })
         }
       } catch (err) {
         console.warn("[Events] Failed to resync session status for", sessionID, err)

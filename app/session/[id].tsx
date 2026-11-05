@@ -38,6 +38,7 @@ import {
   type MentionItem,
 } from "../../src/components/chat"
 import { useSessions } from "../../src/stores/sessions"
+import { useShallow } from "zustand/react/shallow"
 import { useEvents, refreshPending } from "../../src/stores/events"
 import { useConnections } from "../../src/stores/connections"
 import { useAuth } from "../../src/stores/auth"
@@ -101,22 +102,43 @@ export default function SessionScreen() {
   // Raw text of the message opened in the full-screen selection sheet
   const [textSheet, setTextSheet] = useState<string | null>(null)
 
+  // Selector-scoped subscriptions: the screen re-renders only when a value it
+  // actually reads changes, not on every sessions-store write. This screen is
+  // hot during streaming and foreground resumes, when unrelated fields
+  // (loadingMore, hasMore, sending of other sessions...) churn — subscribing to
+  // the whole store made every one of those writes re-render the 1300-line tree.
+  // The actions below don't change identity (they're store methods), so the
+  // useShallow selector returns a stable object and is free of re-renders.
   const {
-    currentSession,
     messages,
     parts,
+    currentSession,
     isLoading,
     loadingMore,
     hasMore,
     error,
-    selectSession,
-    sendMessage,
-    abortSession,
-    createSession,
-    loadOlderMessages,
-    revertToMessage,
-    unrevertSession,
-  } = useSessions()
+  } = useSessions(
+    useShallow((s) => ({
+      messages: s.messages,
+      parts: s.parts,
+      currentSession: s.currentSession,
+      isLoading: s.isLoading,
+      loadingMore: s.loadingMore,
+      hasMore: s.hasMore,
+      error: s.error,
+    })),
+  )
+  const { selectSession, sendMessage, abortSession, createSession, loadOlderMessages, revertToMessage, unrevertSession } = useSessions(
+    useShallow((s) => ({
+      selectSession: s.selectSession,
+      sendMessage: s.sendMessage,
+      abortSession: s.abortSession,
+      createSession: s.createSession,
+      loadOlderMessages: s.loadOlderMessages,
+      revertToMessage: s.revertToMessage,
+      unrevertSession: s.unrevertSession,
+    })),
+  )
 
   // Derive sending state for this specific session
   const isSending = useSessions((s) => !!(currentSession && s.sending[currentSession.id]))

@@ -20,7 +20,7 @@ function parseMessages(response: MessageWithParts[]): { messages: Message[]; par
   return { messages, parts }
 }
 
-function pageSize(): number {
+export function pageSize(): number {
   return useSettings.getState().pageSize
 }
 
@@ -361,18 +361,33 @@ export const useSessions = create<SessionsState>((set, get) => ({
     if (!client || !session) return
 
     try {
-      const response = await client.session.messages(session.id)
+      // Bounded page, not the whole timeline: foreground resumes, busy→idle
+      // and error transitions all funnel here, and each of those moments is
+      // exactly when the user is peering at the screen. Re-fetching every page
+      // of a long history (plus diffing it all synchronously) right then is
+      // what used to stall the UI on return to the app. A single recent page
+      // is enough to surface what changed while away; the merge is
+      // additive/update-only so already-loaded older messages (which live
+      // outside this page) are never dropped.
+      const response = await client.session.messages(session.id, { limit: Math.max(1, pageSize()) })
       // A degenerate empty response (transient server hiccup, pagination edge)
-      // would tell mergeFull to delete every non-temp message and blank the
-      // chat on a mere foreground refresh. Skip rather than wipe — the next
-      // successful refresh reconciles for real.
+      // would tell mergePaged to append nothing (harmless) but merging still
+      // churns every changed signature on the JS thread for zero gain. Skip
+      // rather than churn — the next successful refresh reconciles for real.
       if (!response?.length && get().messages.length > 0) return
-      // Merge against what's already rendered instead of replacing the whole
-      // table: unchanged messages keep their old references so the chat list
-      // only re-renders real updates, while a full timeline stays the authority
-      // for reconciling deletions missed while offline (message-diff-merge).
-      const { messages, parts } = mergeFull(get().messages, get().parts, response)
-      set({ messages, parts })
+      const prevCount = get().messages.length
+      const { messages, parts } = mergePaged(get().messages, get().parts, response)
+      set({
+        messages,
+        parts,
+        // A paged refresh only ever touches the newest window. If it appended
+        // messages the user hasn't loaded yet (a long task finished while the
+        // app was away and added more than a page), the gap between the loaded
+        // history and this new tail can only be backfilled by loadOlderMessages'
+        // full merge — re-arm its trigger instead of leaving a permanent hole
+        // under a hasMore that a prior scroll-to-bottom had set false.
+        hasMore: messages.length > prevCount ? true : get().hasMore,
+      })
     } catch (error) {
       set({ error: "errors.refreshMessages" })
     }

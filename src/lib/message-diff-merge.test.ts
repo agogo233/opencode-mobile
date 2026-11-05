@@ -72,6 +72,15 @@ test("mergePaged keeps references for unchanged paged messages", () => {
   assert.equal(out.parts.a, p1)
 })
 
+test("mergePaged appends genuinely new messages from the page (grows result)", () => {
+  const m1 = msg("a"), m2 = msg("b", "assistant")
+  // b is a brand-new message that arrived while the app was away and sits
+  // beyond the previously loaded window — mergePaged must append it (this
+  // growth is what lets refreshMessages re-arm loadOlderMessages).
+  const out = mergePaged([m1], { a: [] }, [item(m1), item(m2)])
+  assert.deepEqual(out.messages.map((m) => m.id), ["a", "b"])
+})
+
 test("mergeFull handles an empty refreshed list by dropping all non-temp messages", () => {
   const m1 = msg("a")
   const temp = msg("temp-1", "user")
