@@ -7,7 +7,8 @@ import { sanitizeBody } from "../lib/notify-format"
 import { statusFromPart } from "../lib/status-labels"
 import { recordSuccessfulSession } from "../lib/store-review"
 import { isAuthError } from "../lib/api-error"
-import { isSessionActuallyIdle } from "../lib/session-status-reconcile"
+import { isSessionActuallyIdle, sessionLooksBusy } from "../lib/session-status-reconcile"
+import { inferredActiveFromTime } from "../lib/session-active"
 import i18n from "../lib/i18n/config"
 import { AppState } from "react-native"
 import { mergePendingPermissions, normalizePendingPermission, normalizePermissionEvent, type PendingPermission } from "../lib/permissions"
@@ -29,6 +30,12 @@ interface EventsState {
   lastDisconnectAt: number | null
   sessionStatus: Record<string, SessionStatus>
   statusText: Record<string, string>
+  // Cold-start "possibly running" guesses (loadSessions computes them from
+  // v2 time.idle hints / v1 message-tail probes). SSE never replays the busy
+  // event of a session that started before the app opened, so this is the
+  // only marker those sessions get until their next real status event —
+  // which retires the guess (see the session.status case).
+  inferredActive: Record<string, boolean>
   // Permissions & questions (pending per session)
   permissions: Record<string, PendingPermission[]>
   questions: Record<
@@ -49,6 +56,10 @@ interface EventsState {
 
   connect: () => void
   disconnect: () => void
+  // Replace the cold-start inference map wholesale. Computed by loadSessions
+  // after each list fetch; entries are filtered against sessionStatus so a
+  // status event that landed while the caller was computing always wins.
+  setInferredActive: (map: Record<string, boolean>) => void
   // Force an immediate reconnect + full resync, bypassing the backoff loop.
   // Called when the app returns to the foreground: Android freezes JS timers
   // and usually kills the SSE socket while backgrounded, so the backoff
@@ -68,6 +79,8 @@ const erroredSessions = new Set<string>()
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000] as const
 const STABLE_CONNECTION_MS = 10_000
 const PROLONGED_DISCONNECT_MS = 30_000
+// Message-tail probes per inference pass — one bounded request per candidate.
+const PROBE_LIMIT = 10
 
 // Re-fetch pending permissions and questions from the server for a session.
 // Called when entering a session to recover from missed SSE events or failed
@@ -183,6 +196,57 @@ async function resyncBusySessions() {
   )
 }
 
+// Cold-start "possibly running" inference for sessions SSE never spoke for.
+// The stream starts at "now" — a session that went busy before the app opened
+// (desktop/CLI start, or the app was killed mid-run) never delivers its busy
+// event, so the sessions list showed no marker at all. Called by loadSessions
+// after each list fetch:
+//   * v2 timestamps answer most sessions for free (`updated > idle` hints a
+//     run may still be in progress — same inference as the opencode web UI);
+//   * the rest (v1 servers, or a v2 session without time.idle) get a
+//     message-tail probe, bounded to the most recently updated few since a
+//     running session keeps time.updated fresh.
+// SSE remains authoritative: entries are retired by the first real
+// session.status event, and setInferredActive never stamps over a session
+// SSE has already reported on.
+export async function inferActiveSessions(sessions: Session[]) {
+  const inferred: Record<string, boolean> = {}
+  const probe: Session[] = []
+  for (const session of sessions) {
+    if (session.id in useEvents.getState().sessionStatus) continue
+    if (session.time.idle !== undefined) {
+      if (inferredActiveFromTime(session.time.updated, session.time.idle)) {
+        inferred[session.id] = true
+      }
+      continue
+    }
+    probe.push(session)
+  }
+
+  const connState = useConnections.getState()
+  await Promise.all(
+    probe
+      .sort((a, b) => b.time.updated - a.time.updated)
+      .slice(0, PROBE_LIMIT)
+      .map(async (session) => {
+        try {
+          const client = session.directory
+            ? connState.clientForDirectory(session.directory) ?? connState.client
+            : connState.client
+          if (!client) return
+          const response = await client.session.messages(session.id, { limit: 1 })
+          if (sessionLooksBusy((response || []).map((m) => m.info))) {
+            inferred[session.id] = true
+          }
+        } catch (err) {
+          // A failed probe just means no marker — SSE stays the source of truth.
+          console.warn("[Events] Failed to probe session tail for", session.id, err)
+        }
+      }),
+  )
+  useEvents.getState().setInferredActive(inferred)
+}
+
 export const useEvents = create<EventsState>((set, get) => ({
   connected: false,
   authError: false,
@@ -190,6 +254,7 @@ export const useEvents = create<EventsState>((set, get) => ({
   lastDisconnectAt: null,
   sessionStatus: {},
   statusText: {},
+  inferredActive: {},
   permissions: {},
   questions: {},
 
@@ -286,11 +351,22 @@ export const useEvents = create<EventsState>((set, get) => ({
                 abortedSessions.delete(sessionID)
               }
 
-              set((state) => ({
-                sessionStatus: { ...state.sessionStatus, [sessionID]: status },
-                // Clear status text when idle
-                statusText: status.type === "idle" ? { ...state.statusText, [sessionID]: "" } : state.statusText,
-              }))
+              set((state) => {
+                // A real status event is authoritative — retire the cold-start
+                // guess for this session, if any. The record is only copied
+                // when a guess exists, so sessions without one keep the same
+                // reference (no screen-level re-render).
+                const guessed = state.inferredActive
+                const inferredActive = sessionID in guessed
+                  ? Object.fromEntries(Object.entries(guessed).filter(([id]) => id !== sessionID))
+                  : guessed
+                return {
+                  sessionStatus: { ...state.sessionStatus, [sessionID]: status },
+                  // Clear status text when idle
+                  statusText: status.type === "idle" ? { ...state.statusText, [sessionID]: "" } : state.statusText,
+                  inferredActive,
+                }
+              })
 
               // SSE is the source of truth — update sending state unconditionally
               if (status.type === "idle") {
@@ -533,6 +609,14 @@ export const useEvents = create<EventsState>((set, get) => ({
     }
   },
 
+  setInferredActive: (map) => {
+    // A status event that landed while the caller was computing is
+    // authoritative — never stamp a guess over a session SSE has spoken for.
+    const authoritative = get().sessionStatus
+    const filtered = Object.fromEntries(Object.entries(map).filter(([id]) => !(id in authoritative)))
+    set({ inferredActive: filtered })
+  },
+
   disconnect: () => {
     console.log("[SSE] Disconnecting")
     if (reconnectTimer) {
@@ -555,6 +639,7 @@ export const useEvents = create<EventsState>((set, get) => ({
       lastDisconnectAt: null,
       sessionStatus: {},
       statusText: {},
+      inferredActive: {},
       permissions: {},
       questions: {},
     })

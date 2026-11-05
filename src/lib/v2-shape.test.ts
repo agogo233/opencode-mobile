@@ -44,9 +44,20 @@ test("toSession maps v2 location/time/revert into the app shape", () => {
     parentID: "ses_0",
     title: "Hello",
     version: "",
-    time: { created: 10, updated: 20, archived: undefined },
+    time: { created: 10, updated: 20, archived: undefined, idle: undefined },
     revert: { messageID: "msg_9", partID: undefined },
   })
+})
+
+test("toSession keeps time.idle for the cold-start running hint", () => {
+  const info: V2SessionInfo = {
+    id: "ses_2",
+    projectID: "proj1",
+    title: "Run",
+    location: { directory: "/srv/proj" },
+    time: { created: 10, updated: 30, idle: 20 },
+  }
+  assert.equal(toSession(info).time.idle, 20)
 })
 
 test("toMessageWithParts reshapes user/assistant and drops timeline markers", () => {

@@ -67,8 +67,11 @@ function SessionItem({
   const pending = useEvents(
     (s) => (s.permissions[session.id]?.length ?? 0) + (s.questions[session.id]?.length ?? 0),
   )
+  // Cold-start guess (busy before the app opened — SSE never replays that
+  // event); retired automatically once a real status event arrives.
+  const inferred = useEvents((s) => !!s.inferredActive[session.id])
 
-  const active = isActive({ status, sending, pending })
+  const active = isActive({ status, sending, pending, inferred })
   const dotColor = pending > 0 ? "#f59e0b" : status?.type === "retry" ? "#ef4444" : "#8b5cf6"
   const statusLabel =
     pending > 0
@@ -227,6 +230,9 @@ export default function SessionsScreen() {
   const sessionStatus = useEvents((s) => s.sessionStatus)
   const pendingPermissions = useEvents((s) => s.permissions)
   const pendingQuestions = useEvents((s) => s.questions)
+  // Cold-start busy guesses for sessions SSE never spoke for (same cadence
+  // as the records above — changes once per list load, not per streamed part).
+  const inferredActive = useEvents((s) => s.inferredActive)
   const loadCatalog = useCatalog((s) => s.load)
   const dirSheetRef = useRef<BottomSheet>(null)
   const browserSheetRef = useRef<BottomSheet>(null)
@@ -253,8 +259,9 @@ export default function SessionsScreen() {
       status: sessionStatus[id],
       sending: sending[id],
       pending: (pendingPermissions[id]?.length ?? 0) + (pendingQuestions[id]?.length ?? 0),
+      inferred: !!inferredActive[id],
     }),
-    [sessionStatus, sending, pendingPermissions, pendingQuestions],
+    [sessionStatus, sending, pendingPermissions, pendingQuestions, inferredActive],
   )
 
   // Flatten sessions into header+item rows. Active sessions (running, retrying,

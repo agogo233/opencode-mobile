@@ -6,6 +6,7 @@ import { extractPromptFromParts, type PromptFromParts } from "../lib/prompt-from
 import { mergeIncomingMessage } from "../lib/message-merge"
 import { mergeFull, mergePaged } from "../lib/message-diff-merge"
 import { isColdSessionLoad, isLiveEventForSession } from "../lib/session-load-reconcile"
+import { inferActiveSessions } from "./events"
 
 // Helper to convert API response to our internal format
 function parseMessages(response: MessageWithParts[]): { messages: Message[]; parts: Record<string, Part[]> } {
@@ -112,6 +113,10 @@ export const useSessions = create<SessionsState>((set, get) => ({
       // its own directory into the session route so subsequent operations stay scoped.
       const sessions = await client.session.list({ roots: true, limit: 50 })
       set({ sessions, isLoading: false })
+      // Fire-and-forget: cold-start marker for sessions that went busy before
+      // the app opened — SSE never replays their busy event, so the list
+      // infers "possibly running" from list data instead (see events.ts).
+      void inferActiveSessions(sessions)
     } catch (error) {
       set({ error: "errors.loadSessions", isLoading: false })
     }

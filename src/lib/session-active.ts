@@ -19,11 +19,18 @@ export interface ActivitySignals {
   sending?: boolean
   // Count of pending permission + question requests for the session.
   pending?: number
+  // Cold-start fallback: the session looks busy from list data / message-tail
+  // probing because no SSE session.status event has arrived yet (app just
+  // opened). SSE is authoritative — any real status event retires this flag.
+  inferred?: boolean
 }
 
 export function isActive(signals: ActivitySignals): boolean {
   if ((signals.pending ?? 0) > 0) return true
   if (signals.status && signals.status.type !== "idle") return true
+  // Same rule as `sending` below: any status SSE has spoken for is
+  // authoritative, so the cold-start guess only bridges the no-event gap.
+  if (signals.inferred && !signals.status) return true
   // SSE status is the source of truth: sending only counts while the server
   // has not reported a status yet — same rule StatusIndicator uses. The
   // documented trade-off: a second send on a session whose status is already
@@ -39,6 +46,15 @@ export function activePriority(signals: ActivitySignals): number {
   if (signals.status?.type === "retry") return 2
   if (isActive(signals)) return 3
   return 4
+}
+
+// v2 cold-start heuristic: the server stamps `time.idle` at the last idle
+// transition, so activity after it (`updated > idle`) means the session may
+// still be running — the same inference the opencode web UI makes. Absent
+// `idle` (v1 servers, or a v2 session that never ran) stays false: this
+// signals "possibly running", so a missing hint must never read as busy.
+export function inferredActiveFromTime(updated: number, idle: number | undefined): boolean {
+  return idle !== undefined && updated > idle
 }
 
 // Stable active-first ordering: priority decides, original position breaks

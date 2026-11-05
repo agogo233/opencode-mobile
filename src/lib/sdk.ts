@@ -76,6 +76,10 @@ export interface Session {
     updated: number
     compacting?: number
     archived?: number
+    // v2 servers stamp the last idle transition here; `updated > idle` hints
+    // the session may still be running (cold-start indicator before any SSE
+    // session.status event arrives). Absent on v1 servers.
+    idle?: number
   }
   summary?: {
     additions: number

@@ -222,6 +222,11 @@ export function toSession(info: V2SessionInfo): Session {
       created: info.time?.created ?? 0,
       updated: info.time?.updated ?? 0,
       archived: info.time?.archived,
+      // v2-only: timestamp of the last idle transition. `updated > idle` means
+      // activity landed after the session went idle — the server-side signal
+      // for "possibly still running" on a cold app start, before any SSE
+      // session.status event arrives. Absent on v1.
+      idle: info.time?.idle,
     },
     revert: info.revert ? { messageID: info.revert.messageID, partID: info.revert.partID } : undefined,
   }

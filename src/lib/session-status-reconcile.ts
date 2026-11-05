@@ -29,3 +29,17 @@ export function isSessionActuallyIdle(messages: Message[] | null | undefined): b
   if (last.role !== "assistant") return false
   return Boolean(last.time?.completed) || Boolean(last.error)
 }
+
+/**
+ * Cold-start sibling of the heuristic above, for sessions SSE never spoke
+ * for: a run may still be in progress unless the last message is a
+ * terminated assistant message. Differs from !isSessionActuallyIdle on
+ * purpose for an empty tail — a session with no messages was never started,
+ * and marking it busy would light the running indicator on every fresh
+ * session row. The "possibly busy" verdict is a hint only; the first real
+ * session.status event always overrides it.
+ */
+export function sessionLooksBusy(messages: Message[] | null | undefined): boolean {
+  if (!messages || messages.length === 0) return false
+  return !isSessionActuallyIdle(messages)
+}

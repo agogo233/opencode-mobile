@@ -1,6 +1,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isActive, activePriority, orderActiveFirst } from "./session-active.ts"
+import { isActive, activePriority, orderActiveFirst, inferredActiveFromTime } from "./session-active.ts"
+import { sessionLooksBusy } from "./session-status-reconcile.ts"
+import type { Message } from "./sdk.ts"
 
 test("isActive: no signals at all is inactive", () => {
   assert.equal(isActive({}), false)
@@ -32,6 +34,41 @@ test("activePriority: needs-attention > retry > busy > inactive", () => {
   assert.equal(activePriority({ status: { type: "busy" } }), 3)
   assert.equal(activePriority({ sending: true }), 3)
   assert.equal(activePriority({}), 4)
+})
+
+test("isActive: cold-start inferred flag is active and floats like busy", () => {
+  assert.equal(isActive({ inferred: true }), true)
+  assert.equal(activePriority({ inferred: true }), 3)
+  // SSE spoke (idle) → the guess must stand down, same as `sending` below.
+  assert.equal(isActive({ inferred: true, status: { type: "idle" } }), false)
+  assert.equal(isActive({ inferred: false, status: { type: "idle" } }), false)
+})
+
+test("inferredActiveFromTime: activity after the last idle transition hints a run", () => {
+  assert.equal(inferredActiveFromTime(200, 100), true)
+  // Idle is the newest stamp → not running.
+  assert.equal(inferredActiveFromTime(100, 200), false)
+  // Equal stamps → the idle transition covers the update → not running.
+  assert.equal(inferredActiveFromTime(100, 100), false)
+  // No idle stamp (v1 server, or a v2 session that never ran) → no guess.
+  assert.equal(inferredActiveFromTime(100, undefined), false)
+})
+
+test("sessionLooksBusy: message tail decides, empty tail is never busy", () => {
+  const user = { role: "user" } as Message
+  const done = { role: "assistant", time: { created: 1, completed: 2 } } as Message
+  const streaming = { role: "assistant", time: { created: 1 } } as Message
+  const failed = { role: "assistant", time: { created: 1 }, error: { message: "x" } } as Message
+  // Last message is a user prompt awaiting a reply → possibly running.
+  assert.equal(sessionLooksBusy([done, user]), true)
+  // Assistant message without a completed/error stamp → still streaming.
+  assert.equal(sessionLooksBusy([user, streaming]), true)
+  // Terminated assistant messages → not running.
+  assert.equal(sessionLooksBusy([user, done]), false)
+  assert.equal(sessionLooksBusy([user, failed]), false)
+  // Fresh session with no messages must not light the indicator.
+  assert.equal(sessionLooksBusy([]), false)
+  assert.equal(sessionLooksBusy(null), false)
 })
 
 test("orderActiveFirst: active sessions float up, inactive keep their order", () => {
