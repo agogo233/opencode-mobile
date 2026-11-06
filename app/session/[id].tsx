@@ -10,6 +10,8 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Animated,
+  AppState,
 } from "react-native"
 import { KeyboardAvoidingView } from "react-native-keyboard-controller"
 import { useLocalSearchParams, Stack, useRouter, useFocusEffect } from "expo-router"
@@ -22,6 +24,7 @@ import * as Clipboard from "expo-clipboard"
 import type BottomSheet from "@gorhom/bottom-sheet"
 import {
   MessageBubble,
+  MessageRow,
   PermissionPrompt,
   QuestionPrompt,
   StatusIndicator,
@@ -179,6 +182,27 @@ export default function SessionScreen() {
   const reconnectAttempts = useEvents((s) => s.reconnectAttempts)
   const [showConnectedFlash, setShowConnectedFlash] = useState(false)
   const prevReconnecting = useRef(false)
+
+  // Foreground-resume fade: the moment the app comes back, several fetches
+  // land at once (messages page, permissions, busy-session resync) and their
+  // content swaps in abruptly. A short native-driven opacity dip (0.6 → 1)
+  // turns that "snap" into a soft settle. The animation runs on the UI thread
+  // (useNativeDriver) so it stays smooth even while the JS thread is busy
+  // processing the resumed fetches. Transient "active" events (biometric
+  // prompt, app switcher) just re-run the harmless fade.
+  const listOpacity = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return
+      listOpacity.setValue(0.6)
+      Animated.timing(listOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start()
+    })
+    return () => {
+      sub.remove()
+      listOpacity.stopAnimation()
+      listOpacity.setValue(1)
+    }
+  }, [listOpacity])
 
   // Voice input — transcript appends to the text input on completion
   const speech = useSpeech(
@@ -418,12 +442,14 @@ export default function SessionScreen() {
   // the reference-preserving diff-merge actually pay off at the list level.
   const renderMessage = useCallback(
     ({ item }: { item: { message: Message } }) => (
-      <MessageBubble
-        message={item.message}
-        isDark={isDark}
-        onSelectText={openSelectTextSheet}
-        onEdit={startEditFlow}
-      />
+      <MessageRow>
+        <MessageBubble
+          message={item.message}
+          isDark={isDark}
+          onSelectText={openSelectTextSheet}
+          onEdit={startEditFlow}
+        />
+      </MessageRow>
     ),
     [isDark, openSelectTextSheet, startEditFlow],
   )
@@ -877,7 +903,7 @@ export default function SessionScreen() {
             <ActivityIndicator size="large" color={isDark ? "#ffffff" : "#0a0a0a"} />
           </View>
         ) : (
-          <View style={s.listWrap}>
+          <Animated.View style={[s.listWrap, { opacity: listOpacity }]}>
             <FlatList
               ref={flatListRef}
               data={messageData}
@@ -923,7 +949,7 @@ export default function SessionScreen() {
                 <Ionicons name="chevron-down" size={24} color={isDark ? "#ffffff" : "#0a0a0a"} />
               </TouchableOpacity>
             )}
-          </View>
+          </Animated.View>
         )}
 
         {/* Status */}

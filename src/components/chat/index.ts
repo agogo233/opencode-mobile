@@ -1,4 +1,5 @@
 export { MessageBubble } from "./MessageBubble"
+export { MessageRow } from "./MessageRow"
 export { ToolCallCard } from "./ToolCallCard"
 export { DiffView } from "./DiffView"
 export { ReasoningBlock } from "./ReasoningBlock"
