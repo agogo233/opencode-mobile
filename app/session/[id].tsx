@@ -48,7 +48,7 @@ import { detectMentionTrigger, toFileUrl, resolveAbsPath } from "../../src/lib/m
 import { mimeForPath } from "../../src/lib/file-mime"
 import { nameOf } from "../../src/lib/path-utils"
 import { messagePartsToSelectableText } from "../../src/lib/message-text"
-import type { Message, Part } from "../../src/lib/sdk"
+import type { Message } from "../../src/lib/sdk"
 
 // --- Builtin slash commands ---
 function builtinCommands(t: (key: string) => string): SlashCommand[] {
@@ -109,18 +109,12 @@ export default function SessionScreen() {
   // the whole store made every one of those writes re-render the 1300-line tree.
   // The actions below don't change identity (they're store methods), so the
   // useShallow selector returns a stable object and is free of re-renders.
-  const {
-    messages,
-    parts,
-    currentSession,
-    isLoading,
-    loadingMore,
-    hasMore,
-    error,
-  } = useSessions(
+  // parts is also intentionally NOT subscribed here: each MessageBubble
+  // subscribes to its own row (useBubbleParts), so a streamed token re-renders
+  // only that message instead of this whole screen.
+  const { messages, currentSession, isLoading, loadingMore, hasMore, error } = useSessions(
     useShallow((s) => ({
       messages: s.messages,
-      parts: s.parts,
       currentSession: s.currentSession,
       isLoading: s.isLoading,
       loadingMore: s.loadingMore,
@@ -313,17 +307,17 @@ export default function SessionScreen() {
   // message sent concurrently with a revert isn't hidden.
   const revertMessageID = currentSession?.revert?.messageID
 
-  // Inverted FlatList: data is reversed (newest first) so newest renders at bottom
+  // Inverted FlatList: data is reversed (newest first) so newest renders at bottom.
+  // Each row carries only its message: MessageBubble reads its own parts via a
+  // row-level store subscription (useBubbleParts), so parts churn on every
+  // streamed token no longer rebuilds this whole array for long sessions.
   const messageData = useMemo(
     () =>
       (messages || [])
         .filter((msg) => !revertMessageID || msg.id.startsWith("temp-") || msg.id < revertMessageID)
-        .map((msg) => ({
-          message: msg,
-          parts: (parts && parts[msg.id]) || [],
-        }))
+        .map((msg) => ({ message: msg }))
         .reverse(),
-    [messages, parts, revertMessageID],
+    [messages, revertMessageID],
   )
 
   // Tracks the latest composer text without pulling `input` into startEditFlow's
@@ -420,10 +414,9 @@ export default function SessionScreen() {
   // referentially stable (its deps are all stable callbacks/primitives) lets
   // the reference-preserving diff-merge actually pay off at the list level.
   const renderMessage = useCallback(
-    ({ item }: { item: { message: Message; parts: Part[] } }) => (
+    ({ item }: { item: { message: Message } }) => (
       <MessageBubble
         message={item.message}
-        parts={item.parts}
         isDark={isDark}
         onSelectText={openSelectTextSheet}
         onEdit={startEditFlow}

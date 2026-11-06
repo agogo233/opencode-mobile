@@ -10,12 +10,17 @@ import { isDeviceLoadableImage } from "../../lib/file-mime"
 import { nameOf } from "../../lib/path-utils"
 import type { Message, Part } from "../../lib/sdk"
 import { hasSelectableContent } from "../../lib/message-text"
+import { useSessions } from "../../stores/sessions"
 
 const SCREEN_WIDTH = Dimensions.get("window").width
 
 interface Props {
   message: Message
-  parts: Part[]
+  /** Optional: when omitted, the bubble subscribes to its own parts row-level
+      (SessionItem-style), so a streamed update to one message only re-renders
+      that bubble instead of the whole list. The prop is kept for embedders
+      that already hold the parts (e.g. the demo screen). */
+  parts?: Part[]
   isDark: boolean
   // Message actions arrive as buttons in the bubble header (see the header
   // comment in the render). There is deliberately no bubble-wide press or
@@ -29,10 +34,32 @@ interface Props {
 
 // TODO: Replace with streamdown-rn once React 19 types PR lands - it has
 // built-in block-level memoization that eliminates re-renders for stable blocks
+
+// Stable empty array so a message with no parts yet keeps a constant reference
+// (a fresh [] per render would defeat React.memo's bail-out on unrendered rows).
+const EMPTY_PARTS: Part[] = []
+
+// Row-level parts subscription. This is what makes a streamed update re-render
+// ONLY this bubble: the store keeps unchanged messages' parts array references
+// stable (sessions.ts handleEvent maps only the touched message), so the
+// selector below returns the same reference for every other message and they
+// never wake up. props.parts wins when provided (demo screen, etc.).
+//
+// The hook is ALWAYS called (never gated on `provided`) to stay hook-rule
+// compliant: a conditional subscription would change the hook count when an
+// embedder toggles `parts` across renders. When `provided` is set the store
+// subscription still runs but selects an id that has no parts (demo script
+// ids) so it stays EMPTY_PARTS — zero re-renders, zero overhead.
+function useBubbleParts(messageID: string, provided?: Part[]): Part[] {
+  const subscribed = useSessions((s) => s.parts[messageID])
+  return provided ?? subscribed ?? EMPTY_PARTS
+}
+
 export const MessageBubble = memo(
-  function MessageBubble({ message, parts, isDark, onSelectText, onEdit }: Props) {
+  function MessageBubble({ message, parts: providedParts, isDark, onSelectText, onEdit }: Props) {
     const { t } = useTranslation()
     const isUser = message.role === "user"
+    const parts = useBubbleParts(message.id, providedParts)
 
     const textParts = parts.filter((p) => p.type === "text")
     const reasoningParts = parts.filter((p) => p.type === "reasoning")
@@ -184,9 +211,13 @@ export const MessageBubble = memo(
     if (prev.isDark !== next.isDark) return false
     if (prev.onSelectText !== next.onSelectText) return false
     if (prev.onEdit !== next.onEdit) return false
-    if (prev.parts.length !== next.parts.length) return false
-    for (let i = 0; i < prev.parts.length; i++) {
-      if (prev.parts[i] !== next.parts[i]) return false
+    // parts is optional (row-level subscription supplies it when omitted); both
+    // sides share the same style here, so undefined == undefined short-circuits.
+    const prevParts = prev.parts ?? EMPTY_PARTS
+    const nextParts = next.parts ?? EMPTY_PARTS
+    if (prevParts.length !== nextParts.length) return false
+    for (let i = 0; i < prevParts.length; i++) {
+      if (prevParts[i] !== nextParts[i]) return false
     }
     return true
   },

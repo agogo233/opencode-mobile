@@ -4,7 +4,7 @@ import { useConnections } from "./connections"
 import { useSettings } from "./settings"
 import { extractPromptFromParts, type PromptFromParts } from "../lib/prompt-from-parts"
 import { mergeIncomingMessage } from "../lib/message-merge"
-import { mergeFull, mergePaged } from "../lib/message-diff-merge"
+import { mergeFull, mergePaged, partSig } from "../lib/message-diff-merge"
 import { isColdSessionLoad, isLiveEventForSession } from "../lib/session-load-reconcile"
 import { inferActiveSessions } from "./events"
 
@@ -476,11 +476,33 @@ export const useSessions = create<SessionsState>((set, get) => ({
 
         set((state) => {
           const messageParts = state.parts[part.messageID] || []
-          const exists = messageParts.some((p) => p.id === part.id)
+          const existing = messageParts.find((p) => p.id === part.id)
+
+          // Cheap dedup: a re-pushed part whose content is byte-identical to
+          // the stored one changes nothing (it happens on reconnect replays /
+          // duplicate SSE events). Short-circuit on the cheap scalars first —
+          // text grows every token during streaming, and tool parts change
+          // callID/status on real updates (their text is always undefined) —
+          // so the hot path exits in O(1) without touching partSig's stringify.
+          // Only when all cheap fields match do we pay for the full signature
+          // comparison. Returning a partial that keeps `parts` reference
+          // unchanged means no subscriber re-renders. NOTE: the store's whole
+          // sessions-store subscribers still wake (state object is new) but
+          // selector-based rows bail on the unchanged parts reference.
+          if (
+            existing &&
+            existing.text === part.text &&
+            existing.callID === part.callID &&
+            existing.state?.status === part.state?.status &&
+            partSig(existing) === partSig(part)
+          ) {
+            return state.isLoading ? { isLoading: false } : { parts: state.parts }
+          }
+
           return {
             parts: {
               ...state.parts,
-              [part.messageID]: exists
+              [part.messageID]: existing
                 ? messageParts.map((p) => (p.id === part.id ? part : p))
                 : [...messageParts, part],
             },

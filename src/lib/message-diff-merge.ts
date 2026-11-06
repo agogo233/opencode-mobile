@@ -26,7 +26,10 @@ function messageSig(m: Message): string {
   ])
 }
 
-function partSig(p: Part): string {
+// Exported so stores can dedupe identical re-pushed parts cheaply
+// (see sessions.ts handleEvent): a part whose signature matches the already
+// stored one is a duplicate, not a change.
+export function partSig(p: Part): string {
   return JSON.stringify([p.id, p.type, p.text, p.tool, p.callID, p.state, p.time, p.mime, p.url, p.filename])
 }
 

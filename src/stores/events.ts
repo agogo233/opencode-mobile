@@ -10,7 +10,6 @@ import { isAuthError } from "../lib/api-error"
 import { isSessionActuallyIdle, sessionLooksBusy } from "../lib/session-status-reconcile"
 import { inferredActiveFromTime } from "../lib/session-active"
 import i18n from "../lib/i18n/config"
-import { AppState } from "react-native"
 import { mergePendingPermissions, normalizePendingPermission, normalizePermissionEvent, type PendingPermission } from "../lib/permissions"
 import type { Client, Part, Session, Message } from "../lib/sdk"
 
@@ -598,6 +597,12 @@ export const useEvents = create<EventsState>((set, get) => ({
     set({ reconnectAttempts: 0, lastDisconnectAt: null })
     get().connect()
     void resyncBusySessions()
+    // Global permission reconciliation for every client (including per-directory
+    // ones), folded into this single foreground path. Previously a module-level
+    // AppState listener also triggered refreshAllPending on every "active" —
+    // foreground recovery now funnels through reconnectNow and removes that
+    // duplicate trigger, so each resume performs exactly one reconciliation.
+    void refreshAllPending()
     const sessions = useSessions.getState()
     if (sessions.currentSession) {
       scheduleRefreshMessages()
@@ -645,7 +650,3 @@ export const useEvents = create<EventsState>((set, get) => ({
     })
   },
 }))
-
-AppState.addEventListener("change", (state) => {
-  if (state === "active") void refreshAllPending()
-})
