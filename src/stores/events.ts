@@ -10,7 +10,7 @@ import { isAuthError } from "../lib/api-error"
 import { isSessionActuallyIdle, sessionLooksBusy } from "../lib/session-status-reconcile"
 import { inferredActiveFromTime } from "../lib/session-active"
 import i18n from "../lib/i18n/config"
-import { mergePendingPermissions, normalizePendingPermission, normalizePermissionEvent, type PendingPermission } from "../lib/permissions"
+import { mergePendingPermissions, pendingPermissionsSame, normalizePendingPermission, normalizePermissionEvent, type PendingPermission } from "../lib/permissions"
 import type { Client, Part, Session, Message } from "../lib/sdk"
 
 // Session status from the server
@@ -91,10 +91,27 @@ export async function refreshPending(client: Client, sessionID: string) {
     const [perms, questions] = await Promise.all([client.permission.list(sessionID), client.question.list(sessionID)])
     const sessionPerms = (perms || []).map(normalizePendingPermission).filter((p): p is PendingPermission => !!p && p.sessionID === sessionID)
     const sessionQuestions = (questions || []).filter((q: Record<string, unknown>) => q.sessionID === sessionID)
-    useEvents.setState((state) => ({
-      permissions: { ...state.permissions, [sessionID]: mergePendingPermissions([], sessionPerms) },
-      questions: { ...state.questions, [sessionID]: sessionQuestions as any },
-    }))
+    useEvents.setState((state) => {
+      // Reference-stable reconcile: a foreground resume (or re-entering the
+      // session) usually finds the SAME pending prompts the store already
+      // holds. Replacing the arrays unconditionally gave every subscriber a
+      // new reference each time and re-rendered both the chat screen and the
+      // mounted-but-hidden sessions list. When content matches, keep the old
+      // references — and when nothing at all changed, return the SAME state
+      // object so zustand skips notifying subscribers entirely.
+      const prevPerms = state.permissions[sessionID] || []
+      const nextPerms = mergePendingPermissions([], sessionPerms)
+      const prevQuestions = state.questions[sessionID] || []
+      const permsSame = pendingPermissionsSame(prevPerms, nextPerms)
+      const questionsSame =
+        prevQuestions.length === sessionQuestions.length &&
+        prevQuestions.every((q, i) => JSON.stringify(q) === JSON.stringify(sessionQuestions[i]))
+      if (permsSame && questionsSame) return state
+      return {
+        permissions: { ...state.permissions, [sessionID]: permsSame ? prevPerms : nextPerms },
+        questions: { ...state.questions, [sessionID]: questionsSame ? prevQuestions : sessionQuestions },
+      }
+    })
   } catch (err) {
     console.warn("[Events] Failed to refresh pending:", err)
   }
@@ -118,8 +135,22 @@ async function refreshAllPending() {
         if (normalized) grouped.set(normalized.sessionID, [...(grouped.get(normalized.sessionID) || []), normalized])
       }
       useEvents.setState((state) => {
+        // Same reference-stability contract as refreshPending: mergePending
+        // returns the ORIGINAL array when a session's merge changed nothing,
+        // so only sessions with real changes get a fresh reference — and when
+        // the server reports no pending permissions at all (empty grouped) the
+        // same state object goes back and zustand notifies nobody.
         const permissions = { ...state.permissions }
-        for (const [sessionID, items] of grouped) permissions[sessionID] = mergePendingPermissions(permissions[sessionID] || [], items)
+        let changed = false
+        for (const [sessionID, items] of grouped) {
+          const prev = permissions[sessionID] || []
+          const next = mergePendingPermissions(prev, items)
+          if (next !== prev) {
+            permissions[sessionID] = next
+            changed = true
+          }
+        }
+        if (!changed) return state
         return { permissions }
       })
     } catch (err) {

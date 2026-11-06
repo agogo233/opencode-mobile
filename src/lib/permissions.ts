@@ -61,11 +61,56 @@ export function normalizePendingPermission(value: unknown): PendingPermission | 
   })
 }
 
+/** Field-wise equality for one pending permission. Nested records (metadata,
+ * tool, source) are compared via JSON — this runs once per foreground resume
+ * (not per streamed token), so stringify cost is fine here and it sidesteps
+ * hand-rolling deep-equal for three rarely-changing shapes. */
+export function pendingItemSame(a: PendingPermission, b: PendingPermission): boolean {
+  return (
+    a.id === b.id &&
+    a.sessionID === b.sessionID &&
+    a.permission === b.permission &&
+    a.patterns.length === b.patterns.length &&
+    a.patterns.every((v, i) => v === b.patterns[i]) &&
+    JSON.stringify(a.metadata) === JSON.stringify(b.metadata) &&
+    JSON.stringify(a.tool) === JSON.stringify(b.tool) &&
+    JSON.stringify(a.action) === JSON.stringify(b.action) &&
+    JSON.stringify(a.resources) === JSON.stringify(b.resources) &&
+    JSON.stringify(a.save) === JSON.stringify(b.save) &&
+    JSON.stringify(a.source) === JSON.stringify(b.source)
+  )
+}
+
+/** Array-level content equality (same order, same items). */
+export function pendingPermissionsSame(a: PendingPermission[], b: PendingPermission[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (!pendingItemSame(a[i], b[i])) return false
+  return true
+}
+
+/** Merge incoming permission updates into the current list. Reference-stable:
+ * items whose content didn't change keep their exact old object reference, and
+ * when nothing at all changes (no new ids, no revised items) the ORIGINAL array
+ * reference is returned — so zustand subscribers comparing references (e.g.
+ * the session screen's useShallow selectors) see no change and skip re-render.
+ * Foreground resume re-fetches the same pending list over and over; without
+ * this, every resume allocated fresh arrays and woke both the chat screen and
+ * the mounted-but-hidden sessions list. */
 export function mergePendingPermissions(
   current: PendingPermission[], incoming: PendingPermission[],
 ): PendingPermission[] {
   const merged = new Map(current.map((item) => [item.id, item]))
-  for (const item of incoming) merged.set(item.id, { ...merged.get(item.id), ...item })
+  let changed = false
+  for (const item of incoming) {
+    const prev = merged.get(item.id)
+    if (prev && pendingItemSame(prev, item)) continue
+    merged.set(item.id, { ...prev, ...item })
+    changed = true
+  }
+  // No revisions and no new ids (merge never removes) → same content, same
+  // order (Map keeps current's insertion order) → hand back the old array.
+  if (!changed && merged.size === current.length) return current
   return [...merged.values()]
 }
 

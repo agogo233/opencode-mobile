@@ -20,6 +20,7 @@ import { router, useFocusEffect } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useSessions } from "../../src/stores/sessions"
+import { useShallow } from "zustand/react/shallow"
 import { useConnections } from "../../src/stores/connections"
 import { useEvents } from "../../src/stores/events"
 import { useCatalog } from "../../src/stores/catalog"
@@ -208,7 +209,26 @@ export default function SessionsScreen() {
   const creatingInFlight = useRef(false)
   const [serverProjects, setServerProjects] = useState<Project[]>([])
 
-  const { sessions, isLoading, error, sending, loadSessions, createSession, deleteSession } = useSessions()
+  // Whole-store subscription here re-rendered this (mounted-but-hidden under
+  // the session screen) list on EVERY sessions-store write — foreground
+  // resumes write several (messages/parts merges, sending flips...). Split
+  // into shallow-compared data + stable action references, same pattern as
+  // the session screen's selectors.
+  const { sessions, isLoading, error, sending } = useSessions(
+    useShallow((s) => ({
+      sessions: s.sessions,
+      isLoading: s.isLoading,
+      error: s.error,
+      sending: s.sending,
+    })),
+  )
+  const { loadSessions, createSession, deleteSession } = useSessions(
+    useShallow((s) => ({
+      loadSessions: s.loadSessions,
+      createSession: s.createSession,
+      deleteSession: s.deleteSession,
+    })),
+  )
   const {
     activeConnection,
     client,

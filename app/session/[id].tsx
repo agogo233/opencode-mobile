@@ -158,10 +158,13 @@ export default function SessionScreen() {
   const setVariant = catalog.setVariant
   const cycleAgent = catalog.cycleAgent
 
-  // Permission & question state
+  // Permission & question state. useShallow: a foreground resume re-fetches
+  // these lists and even the reference-stable store write (see
+  // refreshPending) can hand back a fresh-but-equal array — shallow compare
+  // lets equal content pass without re-rendering this screen.
   const sessionID = currentSession?.id
-  const permissions = useEvents((s) => (sessionID ? s.permissions[sessionID] : undefined)) || []
-  const questions = useEvents((s) => (sessionID ? s.questions[sessionID] : undefined)) || []
+  const permissions = useEvents(useShallow((s) => (sessionID ? s.permissions[sessionID] : undefined))) || []
+  const questions = useEvents(useShallow((s) => (sessionID ? s.questions[sessionID] : undefined))) || []
 
   const shortDir = getShortDir(currentSession?.directory)
   const [showScrollButton, setShowScrollButton] = useState(false)
