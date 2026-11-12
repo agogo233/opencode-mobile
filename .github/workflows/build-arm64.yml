@@ -9,10 +9,21 @@ concurrency:
   group: build-arm64-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   build-arm64:
     runs-on: ubuntu-latest
     steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 7
+          keep_minimum_runs: 3
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
@@ -84,5 +95,6 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
+          retention-days: 7
           name: app-release-arm64-v8a
           path: app-release-arm64-v8a.apk
