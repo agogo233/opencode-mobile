@@ -29,6 +29,7 @@ import {
   QuestionPrompt,
   StatusIndicator,
   SlashPopover,
+  CommandPicker,
   MentionPopover,
   ModelPicker,
   AgentPicker,
@@ -77,6 +78,13 @@ function builtinCommands(t: (key: string) => string): SlashCommand[] {
       icon: "person-outline",
       type: "builtin",
     },
+    {
+      trigger: "compact",
+      title: t("session.slash.compact.title"),
+      description: t("session.slash.compact.description"),
+      icon: "contract-outline",
+      type: "builtin",
+    },
   ]
 }
 
@@ -98,6 +106,8 @@ export default function SessionScreen() {
   const modelSheetRef = useRef<BottomSheet>(null)
   const agentSheetRef = useRef<BottomSheet>(null)
   const variantSheetRef = useRef<BottomSheet>(null)
+  const commandSheetRef = useRef<BottomSheet>(null)
+  const chatInputRef = useRef<TextInput>(null)
   const creatingInFlight = useRef(false)
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -160,6 +170,12 @@ export default function SessionScreen() {
   const variant = catalog.variant
   const setVariant = catalog.setVariant
   const cycleAgent = catalog.cycleAgent
+
+  // Fallback catalog load: resuming straight into a chat screen can skip the
+  // tab-screen load, which would leave the command list empty forever.
+  useEffect(() => {
+    if (client && !catalog.loaded) catalog.load()
+  }, [client, catalog])
 
   // Permission & question state. useShallow: a foreground resume re-fetches
   // these lists and even the reference-stable store write (see
@@ -506,11 +522,26 @@ export default function SessionScreen() {
             setInput("")
             cycleAgent()
             return
+          case "compact":
+            if (!currentSession || !sessionClient) return
+            if (!model) {
+              Alert.alert(t("session.slash.compact.title"), t("session.alerts.modelRequired"))
+              return
+            }
+            setInput("")
+            sessionClient.session
+              .compact(currentSession.id, { providerID: model.providerID, modelID: model.modelID })
+              .catch((err) => {
+                console.error("Compact failed:", err)
+                Alert.alert(t("session.slash.compact.title"), t("session.alerts.compactFailed"))
+              })
+            return
         }
       }
       setInput(`/${cmd.trigger} `)
+      chatInputRef.current?.focus()
     },
-    [router, cycleAgent],
+    [router, cycleAgent, currentSession, model, sessionClient, t],
   )
 
   // --- Image picking ---
@@ -1001,7 +1032,9 @@ export default function SessionScreen() {
             testID="agent-chip"
           >
             <View style={[s.agentDot, { backgroundColor: agentColor }]} />
-            <Text style={[s.agentLabel, isDark && s.textWhite]}>{agent || "build"}</Text>
+            <Text style={[s.agentLabel, isDark && s.textWhite]} numberOfLines={1}>
+              {agent || "build"}
+            </Text>
             <Ionicons name="swap-horizontal-outline" size={12} color={isDark ? "#888888" : "#666666"} />
           </TouchableOpacity>
 
@@ -1028,6 +1061,17 @@ export default function SessionScreen() {
               </Text>
             </TouchableOpacity>
           )}
+
+          <TouchableOpacity
+            style={[s.commandChip, isDark && s.commandChipDark]}
+            onPress={() => commandSheetRef.current?.expand()}
+            testID="command-chip"
+          >
+            <Ionicons name="code-slash-outline" size={14} color={isDark ? "#888888" : "#666666"} />
+            <Text style={[s.commandLabel, isDark && s.metaDark]} numberOfLines={1}>
+              {t("session.toolbar.command")}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Attachment preview */}
@@ -1049,6 +1093,7 @@ export default function SessionScreen() {
             </TouchableOpacity>
 
             <TextInput
+              ref={chatInputRef}
               style={[s.input, isDark && s.inputDark, speech.listening && s.inputListening]}
               placeholder={
                 speech.listening
@@ -1126,6 +1171,13 @@ export default function SessionScreen() {
         selected={variant}
         isDark={isDark}
         onSelect={setVariant}
+      />
+
+      <CommandPicker
+        sheetRef={commandSheetRef}
+        commands={allCommands}
+        isDark={isDark}
+        onSelect={handleSlashSelect}
       />
     </>
   )
@@ -1205,6 +1257,7 @@ const s = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
+    flexShrink: 1,
   },
   agentDot: { width: 8, height: 8, borderRadius: 4 },
   agentLabel: { fontSize: 12, fontWeight: "600", color: "#0a0a0a" },
@@ -1216,6 +1269,7 @@ const s = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
+    flexShrink: 1,
   },
   modelChipDark: { backgroundColor: "#1a1a1a" },
   modelLabel: { fontSize: 12, color: "#666666", maxWidth: 160 },
@@ -1234,6 +1288,20 @@ const s = StyleSheet.create({
   variantChipActive: { backgroundColor: "#f5f3ff" },
   variantLabel: { fontSize: 12, color: "#666666" },
   variantLabelActive: { color: "#8b5cf6" },
+
+  // Command chip
+  commandChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#f5f5f5",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    flexShrink: 0,
+  },
+  commandChipDark: { backgroundColor: "#1a1a1a" },
+  commandLabel: { fontSize: 12, color: "#666666" },
 
   // Input
   inputContainer: {

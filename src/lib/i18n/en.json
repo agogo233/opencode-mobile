@@ -74,7 +74,8 @@
   "session": {
     "titleFallback": "Session",
     "toolbar": {
-      "auto": "Auto"
+      "auto": "Auto",
+      "command": "Cmd"
     },
     "banners": {
       "reconnecting": "Reconnecting… (attempt {{attempt}})",
@@ -133,7 +134,9 @@
       "imageFailedTitle": "Image not attached",
       "imageFailedMessage": "One or more images could not be processed. Please try a different photo.",
       "speechErrorTitle": "Voice input failed",
-      "speechErrorMessage": "Could not use voice input. Check your microphone permission and try again."
+      "speechErrorMessage": "Could not use voice input. Check your microphone permission and try again.",
+      "modelRequired": "Select a model before compacting.",
+      "compactFailed": "Compaction failed. Please try again."
     },
     "slash": {
       "new": {
@@ -147,6 +150,10 @@
       "agent": {
         "title": "Switch Agent",
         "description": "Cycle to next agent"
+      },
+      "compact": {
+        "title": "Compact",
+        "description": "Summarize and compress the conversation"
       }
     }
   },
@@ -416,6 +423,9 @@
     },
     "slashPopover": {
       "customBadge": "cmd"
+    },
+    "commandPicker": {
+      "title": "Commands"
     },
     "modelPicker": {
       "title": "Select Model",

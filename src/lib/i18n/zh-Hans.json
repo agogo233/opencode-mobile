@@ -74,7 +74,8 @@
   "session": {
     "titleFallback": "会话",
     "toolbar": {
-      "auto": "自动"
+      "auto": "自动",
+      "command": "命令"
     },
     "banners": {
       "reconnecting": "正在重新连接…（第 {{attempt}} 次尝试）",
@@ -133,7 +134,9 @@
       "imageFailedTitle": "图片未添加",
       "imageFailedMessage": "一张或多张图片无法处理。请尝试其他照片。",
       "speechErrorTitle": "语音输入失败",
-      "speechErrorMessage": "无法使用语音输入。请检查麦克风权限后重试。"
+      "speechErrorMessage": "无法使用语音输入。请检查麦克风权限后重试。",
+      "modelRequired": "压缩前请先选择模型。",
+      "compactFailed": "压缩失败，请重试。"
     },
     "slash": {
       "new": {
@@ -147,6 +150,10 @@
       "agent": {
         "title": "切换代理",
         "description": "切换到下一个代理"
+      },
+      "compact": {
+        "title": "压缩",
+        "description": "总结并压缩会话上下文"
       }
     }
   },
@@ -416,6 +423,9 @@
     },
     "slashPopover": {
       "customBadge": "命令"
+    },
+    "commandPicker": {
+      "title": "命令"
     },
     "modelPicker": {
       "title": "选择模型",

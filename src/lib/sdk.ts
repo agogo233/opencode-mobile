@@ -677,6 +677,13 @@ project: {
         })
       },
 
+      compact: async (
+        sessionID: string,
+        _model?: { providerID: string; modelID: string },
+      ): Promise<void> => {
+        await request(config, `/api/session/${sessionID}/compact`, { method: "POST" })
+      },
+
       // v2 replaces abort with interrupt (POST returns {interrupted}).
       abort: async (sessionID: string): Promise<boolean> => {
         const body = await request<{ interrupted?: boolean }>(config, `/api/session/${sessionID}/interrupt`, {

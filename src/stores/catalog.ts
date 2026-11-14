@@ -47,6 +47,10 @@ interface CatalogState {
   cycleAgent: (direction?: 1 | -1) => void
 }
 
+// Single in-flight guard: concurrent load() calls (app start, tab screen,
+// session-screen fallback) share one request round instead of triple-firing.
+let loadInflight: Promise<void> | null = null
+
 export const useCatalog = create<CatalogState>((set, get) => ({
   agents: [],
   commands: [],
@@ -58,71 +62,79 @@ export const useCatalog = create<CatalogState>((set, get) => ({
   loaded: false,
 
   load: async () => {
-    const client = useConnections.getState().client
-    if (!client) return
+    if (loadInflight) return loadInflight
+    loadInflight = (async () => {
+      const client = useConnections.getState().client
+      if (!client) return
 
-    const [agentResult, commandResult, providerResult] = await Promise.all([
-      client.agent.list().catch(() => [] as Agent[]),
-      client.command.list().catch(() => [] as Command[]),
-      client.provider.list().catch(() => null),
-    ])
+      const [agentResult, commandResult, providerResult] = await Promise.all([
+        client.agent.list().catch(() => [] as Agent[]),
+        client.command.list().catch(() => [] as Command[]),
+        client.provider.list().catch(() => null),
+      ])
 
-    const agents = Array.isArray(agentResult) ? agentResult : []
-    const commands = Array.isArray(commandResult) ? commandResult : []
+      const agents = Array.isArray(agentResult) ? agentResult : []
+      const commands = Array.isArray(commandResult) ? commandResult : []
 
-    // Parse provider response: { all: [...], default: {...}, connected: [...] }
-    const raw = providerResult
-    const connected = new Set(Array.isArray(raw?.connected) ? raw.connected : [])
-    const defaults = raw?.default || {}
-    const providers: Provider[] = Array.isArray(raw?.all)
-      ? raw.all
-          .filter((p) => connected.has(p.id))
-          .map((p) => ({
-            id: p.id,
-            name: p.name || p.id,
-            connected: connected.has(p.id),
-            models: Object.values(p.models || {})
-              .filter((m) => m.status !== "deprecated")
-              .map((m) => ({
-                id: m.id,
-                name: m.name || m.id,
-                reasoning: m.reasoning ?? false,
-                attachment: m.attachment ?? false,
-                limit: m.limit,
-                variants: m.variants,
-              })),
-          }))
-          .filter((p) => p.models.length > 0)
-      : []
+      // Parse provider response: { all: [...], default: {...}, connected: [...] }
+      const raw = providerResult
+      const connected = new Set(Array.isArray(raw?.connected) ? raw.connected : [])
+      const defaults = raw?.default || {}
+      const providers: Provider[] = Array.isArray(raw?.all)
+        ? raw.all
+            .filter((p) => connected.has(p.id))
+            .map((p) => ({
+              id: p.id,
+              name: p.name || p.id,
+              connected: connected.has(p.id),
+              models: Object.values(p.models || {})
+                .filter((m) => m.status !== "deprecated")
+                .map((m) => ({
+                  id: m.id,
+                  name: m.name || m.id,
+                  reasoning: m.reasoning ?? false,
+                  attachment: m.attachment ?? false,
+                  limit: m.limit,
+                  variants: m.variants,
+                })),
+            }))
+            .filter((p) => p.models.length > 0)
+        : []
 
-    // Filter out hidden agents
-    const visible = agents.filter((a) => !a.hidden)
+      // Filter out hidden agents
+      const visible = agents.filter((a) => !a.hidden)
 
-    // Default agent
-    const current = get().agent
-    const agent = current && visible.some((a) => a.name === current) ? current : visible[0]?.name || "build"
+      // Default agent
+      const current = get().agent
+      const agent = current && visible.some((a) => a.name === current) ? current : visible[0]?.name || "build"
 
-    // Default model: keep valid existing selection; otherwise prefer connected
-    // provider defaults, then first connected model; agent model is last fallback.
-    const existing = get().model
-    const defaultAgent = visible[0]
-    const model = chooseModelSelection({
-      providers,
-      defaults,
-      existing,
-      agentModel: defaultAgent?.model || null,
-    })
+      // Default model: keep valid existing selection; otherwise prefer connected
+      // provider defaults, then first connected model; agent model is last fallback.
+      const existing = get().model
+      const defaultAgent = visible[0]
+      const model = chooseModelSelection({
+        providers,
+        defaults,
+        existing,
+        agentModel: defaultAgent?.model || null,
+      })
 
-    set((state) => ({
-      agents: visible,
-      commands,
-      providers,
-      defaults,
-      agent,
-      model,
-      variant: sameModel(state.model, model) ? state.variant : null,
-      loaded: true,
-    }))
+      set((state) => ({
+        agents: visible,
+        commands,
+        providers,
+        defaults,
+        agent,
+        model,
+        variant: sameModel(state.model, model) ? state.variant : null,
+        loaded: true,
+      }))
+    })()
+    try {
+      await loadInflight
+    } finally {
+      loadInflight = null
+    }
   },
 
   setAgent: (name) => {

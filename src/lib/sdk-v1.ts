@@ -183,6 +183,10 @@ export interface HealthResponse {
 
 const REQUEST_TIMEOUT_MS = 30_000
 
+// Summarize runs a full LLM pass over the transcript, so it can outlast the
+// general request timeout on long sessions.
+const COMPACT_TIMEOUT_MS = 120_000
+
 // Thrown by request() on a non-2xx response. Carries the HTTP status so
 // callers can distinguish e.g. 404 (older server, endpoint missing) from
 // other failures without parsing the message string.
@@ -452,6 +456,22 @@ export function createV1Client(config: ClientConfig) {
           const error = await response.text()
           throw new Error(`Failed to run command: ${response.status} - ${error}`)
         }
+      },
+
+      compact: async (
+        sessionID: string,
+        model?: { providerID: string; modelID: string },
+      ): Promise<void> => {
+        if (!model) throw new Error("compact requires the currently selected model on v1 servers")
+        await request(
+          config,
+          `/session/${sessionID}/summarize`,
+          {
+            method: "POST",
+            body: JSON.stringify({ providerID: model.providerID, modelID: model.modelID }),
+          },
+          COMPACT_TIMEOUT_MS,
+        )
       },
 
       abort: (sessionID: string) => request<boolean>(config, `/session/${sessionID}/abort`, { method: "POST" }),
