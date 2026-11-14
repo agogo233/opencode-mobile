@@ -183,6 +183,7 @@ export default function EditConnectionScreen() {
     <KeyboardAvoidingView
       style={[styles.container, isDark && styles.containerDark]}
       behavior="padding"
+      automaticOffset={Platform.OS === "android"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
     <ScrollView

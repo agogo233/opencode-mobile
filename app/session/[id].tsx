@@ -847,9 +847,12 @@ export default function SessionScreen() {
       <KeyboardAvoidingView
         style={[s.container, isDark && s.containerDark]}
         // "padding" pushes the composer/toolbar above the keyboard. On Android
-        // the padding is driven by the native WindowInsets from MainActivity
-        // (see #216); on iOS by the keyboard frame events.
+        // automaticOffset resolves the view's absolute window position so the
+        // status-bar + header height is not subtracted from the keyboard lift
+        // (without it the composer stays partially covered by the keyboard);
+        // on iOS the keyboard frame events drive it via the offset below.
         behavior="padding"
+        automaticOffset={Platform.OS === "android"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
         {/* Session info pulldown */}
