@@ -8,7 +8,7 @@ import { statusFromPart } from "../lib/status-labels"
 import { recordSuccessfulSession } from "../lib/store-review"
 import { isAuthError } from "../lib/api-error"
 import { isSessionActuallyIdle, sessionLooksBusy } from "../lib/session-status-reconcile"
-import { inferredActiveFromTime } from "../lib/session-active"
+import { planActivityInference } from "../lib/session-active"
 import i18n from "../lib/i18n/config"
 import { mergePendingPermissions, pendingPermissionsSame, normalizePendingPermission, normalizePermissionEvent, type PendingPermission } from "../lib/permissions"
 import type { Client, Part, Session, Message } from "../lib/sdk"
@@ -29,11 +29,13 @@ interface EventsState {
   lastDisconnectAt: number | null
   sessionStatus: Record<string, SessionStatus>
   statusText: Record<string, string>
-  // Cold-start "possibly running" guesses (loadSessions computes them from
-  // v2 time.idle hints / v1 message-tail probes). SSE never replays the busy
-  // event of a session that started before the app opened, so this is the
-  // only marker those sessions get until their next real status event —
-  // which retires the guess (see the session.status case).
+  // "Possibly running" guesses computed from server data (v2 time.idle hints
+  // / v1 message-tail probes). Written on cold start (loadSessions) AND after
+  // each SSE reconnect (reconcileActiveSessions) — the stream never replays
+  // the busy event of a run that started before the app opened or while the
+  // connection was down, so this is the only marker those sessions get until
+  // their next real status event, which retires the guess (see the
+  // session.status case).
   inferredActive: Record<string, boolean>
   // Permissions & questions (pending per session)
   permissions: Record<string, PendingPermission[]>
@@ -55,9 +57,10 @@ interface EventsState {
 
   connect: () => void
   disconnect: () => void
-  // Replace the cold-start inference map wholesale. Computed by loadSessions
-  // after each list fetch; entries are filtered against sessionStatus so a
-  // status event that landed while the caller was computing always wins.
+  // Replace the inference map wholesale. Computed by loadSessions (cold
+  // start) and reconcileActiveSessions (post-reconnect); entries are
+  // filtered against sessionStatus so busy/retry events that landed while
+  // the caller was computing always win.
   setInferredActive: (map: Record<string, boolean>) => void
   // Force an immediate reconnect + full resync, bypassing the backoff loop.
   // Called when the app returns to the foreground: Android freezes JS timers
@@ -74,6 +77,11 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 // transition — so without this mark an errored run would count as a success
 // toward the once-ever store review prompt.
 const erroredSessions = new Set<string>()
+
+// Incremented on disconnect() so an inference request that resolves after a
+// connection switch can't write stale guesses into the new connection's
+// state (setInferredActive itself is unconditional).
+let inferenceEpoch = 0
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000] as const
 const STABLE_CONNECTION_MS = 10_000
@@ -226,32 +234,24 @@ async function resyncBusySessions() {
   )
 }
 
-// Cold-start "possibly running" inference for sessions SSE never spoke for.
-// The stream starts at "now" — a session that went busy before the app opened
-// (desktop/CLI start, or the app was killed mid-run) never delivers its busy
-// event, so the sessions list showed no marker at all. Called by loadSessions
-// after each list fetch:
+// "Possibly running" inference for sessions the SSE stream hasn't spoken for:
+//   * cold start — the stream starts at "now", so a session that went busy
+//     before the app opened (desktop/CLI start, or the app was killed mid-run)
+//     never delivers its busy event;
+//   * reconnect — the stream does not replay missed events, so a busy event
+//     lost to a dropped connection leaves a stale idle record behind.
+// Called by loadSessions after each list fetch (cold start) and by
+// reconcileActiveSessions after each reconnect:
 //   * v2 timestamps answer most sessions for free (`updated > idle` hints a
 //     run may still be in progress — same inference as the opencode web UI);
 //   * the rest (v1 servers, or a v2 session without time.idle) get a
 //     message-tail probe, bounded to the most recently updated few since a
 //     running session keeps time.updated fresh.
-// SSE remains authoritative: entries are retired by the first real
-// session.status event, and setInferredActive never stamps over a session
-// SSE has already reported on.
+// Entries are retired by the first real session.status event, and never
+// stamped over a session SSE currently reports as busy/retry.
 export async function inferActiveSessions(sessions: Session[]) {
-  const inferred: Record<string, boolean> = {}
-  const probe: Session[] = []
-  for (const session of sessions) {
-    if (session.id in useEvents.getState().sessionStatus) continue
-    if (session.time.idle !== undefined) {
-      if (inferredActiveFromTime(session.time.updated, session.time.idle)) {
-        inferred[session.id] = true
-      }
-      continue
-    }
-    probe.push(session)
-  }
+  const epoch = inferenceEpoch
+  const { inferred, probe } = planActivityInference(sessions, (id) => useEvents.getState().sessionStatus[id])
 
   const connState = useConnections.getState()
   await Promise.all(
@@ -274,7 +274,29 @@ export async function inferActiveSessions(sessions: Session[]) {
         }
       }),
   )
+  // The connection was switched/disconnected while this inference was in
+  // flight — its guesses belong to the old connection, drop them.
+  if (epoch !== inferenceEpoch) return
   useEvents.getState().setInferredActive(inferred)
+}
+
+// Post-reconnect companion to resyncBusySessions: that one only CLEARS stale
+// busy flags the server disproves; this one re-marks sessions whose busy
+// event was LOST to the same dropped connection (the stream resumes from
+// "now" and never replays it). Runs on a freshly fetched list — the store's
+// copy predates the outage, so a session that started running mid-outage
+// would still carry pre-outage timestamps there. Long-running subagent work
+// is the typical victim: minutes of busy with no follow-up events to heal it.
+export async function reconcileActiveSessions() {
+  const connState = useConnections.getState()
+  const client = connState.clientForDirectory(undefined) ?? connState.client
+  if (!client) return
+  try {
+    const sessions = await client.session.list({ roots: true, limit: 50 })
+    await inferActiveSessions(sessions)
+  } catch (err) {
+    console.warn("[Events] Failed to reconcile session activity:", err)
+  }
 }
 
 export const useEvents = create<EventsState>((set, get) => ({
@@ -357,7 +379,10 @@ export const useEvents = create<EventsState>((set, get) => ({
           // per reconnect, not on every event.
           if (isReconnect && !resyncedAfterReconnect) {
             resyncedAfterReconnect = true
-            void resyncBusySessions()
+            // Order matters: clear disproven busy flags first, then reconcile
+            // activity on a freshly fetched list, so a just-cleared session's
+            // new idle stamp can't be misread as "still running".
+            void resyncBusySessions().then(() => reconcileActiveSessions())
             void refreshAllPending()
           }
 
@@ -371,9 +396,14 @@ export const useEvents = create<EventsState>((set, get) => ({
               const status = props.status as SessionStatus
               if (!sessionID) break
 
-              // Detect busy → idle transition for completion notification
+              // Detect busy → idle transition for completion notification.
+              // A run whose busy event was lost to a dropped connection
+              // leaves only the inferred "possibly running" guess behind —
+              // treat its idle as a completion too, so the notification and
+              // store-review path don't miss it.
               const previous = get().sessionStatus[sessionID]
-              const completed = previous?.type === "busy" && status.type === "idle"
+              const wasGuessed = sessionID in get().inferredActive
+              const completed = status.type === "idle" && (previous?.type === "busy" || wasGuessed)
 
               // A new run starts — forget any error/abort from the previous one
               if (status.type === "busy") {
@@ -627,7 +657,9 @@ export const useEvents = create<EventsState>((set, get) => ({
     // run the resync explicitly below instead.
     set({ reconnectAttempts: 0, lastDisconnectAt: null })
     get().connect()
-    void resyncBusySessions()
+    // Same ordering as the in-stream reconnect path: clear stale busy flags
+    // before reconciling activity against a freshly fetched list.
+    void resyncBusySessions().then(() => reconcileActiveSessions())
     // Global permission reconciliation for every client (including per-directory
     // ones), folded into this single foreground path. Previously a module-level
     // AppState listener also triggered refreshAllPending on every "active" —
@@ -646,15 +678,25 @@ export const useEvents = create<EventsState>((set, get) => ({
   },
 
   setInferredActive: (map) => {
-    // A status event that landed while the caller was computing is
-    // authoritative — never stamp a guess over a session SSE has spoken for.
+    // A guess is suppressed only where SSE is actively authoritative (busy /
+    // retry). An idle record does NOT suppress it: the guess is written
+    // precisely when that record may be stale — a run that started while the
+    // event stream was down never delivered its busy event, so the only local
+    // trace is an old idle stamp next to fresh server-side activity. Any real
+    // status event retires the guess (see the session.status case).
     const authoritative = get().sessionStatus
-    const filtered = Object.fromEntries(Object.entries(map).filter(([id]) => !(id in authoritative)))
+    const filtered = Object.fromEntries(
+      Object.entries(map).filter(([id]) => {
+        const status = authoritative[id]
+        return !status || status.type === "idle"
+      }),
+    )
     set({ inferredActive: filtered })
   },
 
   disconnect: () => {
     console.log("[SSE] Disconnecting")
+    inferenceEpoch++
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null

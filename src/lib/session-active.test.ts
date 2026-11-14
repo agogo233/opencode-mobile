@@ -1,8 +1,20 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isActive, activePriority, orderActiveFirst, inferredActiveFromTime } from "./session-active.ts"
+import { isActive, activePriority, orderActiveFirst, inferredActiveFromTime, planActivityInference } from "./session-active.ts"
 import { sessionLooksBusy } from "./session-status-reconcile.ts"
-import type { Message } from "./sdk.ts"
+import type { Message, Session } from "./sdk.ts"
+
+function session(overrides: Partial<Session> & { id: string }): Session {
+  return {
+    slug: overrides.id,
+    projectID: "p",
+    directory: "/tmp",
+    title: overrides.id,
+    version: "1.0.0",
+    time: { created: 0, updated: 0 },
+    ...overrides,
+  } as Session
+}
 
 test("isActive: no signals at all is inactive", () => {
   assert.equal(isActive({}), false)
@@ -36,12 +48,50 @@ test("activePriority: needs-attention > retry > busy > inactive", () => {
   assert.equal(activePriority({}), 4)
 })
 
-test("isActive: cold-start inferred flag is active and floats like busy", () => {
+test("isActive: inferred guess stays active even over a stale idle record", () => {
   assert.equal(isActive({ inferred: true }), true)
   assert.equal(activePriority({ inferred: true }), 3)
-  // SSE spoke (idle) → the guess must stand down, same as `sending` below.
-  assert.equal(isActive({ inferred: true, status: { type: "idle" } }), false)
+  // The guess is written precisely when the local record may be stale (a
+  // busy event lost to a dropped connection) — an idle record must not
+  // suppress it. Any real status event retires the guess instead.
+  assert.equal(isActive({ inferred: true, status: { type: "idle" } }), true)
   assert.equal(isActive({ inferred: false, status: { type: "idle" } }), false)
+})
+
+test("planActivityInference: v2 time hint infers actives; idle records don't block", () => {
+  const sessions = [
+    session({ id: "running", time: { created: 0, updated: 200, idle: 100 } }),
+    session({ id: "done", time: { created: 0, updated: 100, idle: 200 } }),
+    session({ id: "busy", time: { created: 0, updated: 300, idle: 100 } }),
+  ]
+  const statusOf = (id: string) => (id === "busy" ? { type: "busy" as const } : { type: "idle" as const })
+  const { inferred, probe } = planActivityInference(sessions, statusOf)
+  assert.deepEqual(inferred, { running: true })
+  assert.equal(probe.length, 0)
+})
+
+test("planActivityInference: v1 sessions without time.idle go to the probe list", () => {
+  const sessions = [
+    session({ id: "newer", time: { created: 0, updated: 300 } }),
+    session({ id: "older", time: { created: 0, updated: 100 } }),
+  ]
+  const { inferred, probe } = planActivityInference(sessions, () => undefined)
+  assert.deepEqual(inferred, {})
+  assert.deepEqual(probe.map((s) => s.id), ["newer", "older"])
+})
+
+test("planActivityInference: never guesses over busy/retry, even with fresh activity", () => {
+  const sessions = [session({ id: "retrying", time: { created: 0, updated: 999, idle: 100 } })]
+  const { inferred, probe } = planActivityInference(sessions, () => ({ type: "retry", attempt: 1 }))
+  assert.deepEqual(inferred, {})
+  assert.equal(probe.length, 0)
+})
+
+test("planActivityInference: busy/retry keeps v1 sessions out of the probe list too", () => {
+  const sessions = [session({ id: "v1busy", time: { created: 0, updated: 999 } })]
+  const { inferred, probe } = planActivityInference(sessions, () => ({ type: "busy" }))
+  assert.deepEqual(inferred, {})
+  assert.equal(probe.length, 0)
 })
 
 test("inferredActiveFromTime: activity after the last idle transition hints a run", () => {

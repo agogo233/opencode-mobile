@@ -6,6 +6,7 @@
 // `status` mirrors the sessionStatus union in stores/events.ts (which owns the
 // SSE-driven copy); declared structurally here so this module stays testable
 // without importing the RN-only store.
+import type { Session } from "./sdk"
 
 export interface ActivityStatus {
   type: "idle" | "busy" | "retry"
@@ -19,18 +20,22 @@ export interface ActivitySignals {
   sending?: boolean
   // Count of pending permission + question requests for the session.
   pending?: number
-  // Cold-start fallback: the session looks busy from list data / message-tail
-  // probing because no SSE session.status event has arrived yet (app just
-  // opened). SSE is authoritative — any real status event retires this flag.
+  // "Possibly running" guess computed from SERVER data (v2 time.idle hint or
+  // a message-tail probe): cold start, or a reconnect resync after a busy
+  // event was lost to a dropped connection. Deliberately NOT suppressed by an
+  // existing idle record — that record is exactly what may be stale in the
+  // lost-busy scenario. Any real status event retires the guess (stores/events.ts).
   inferred?: boolean
 }
 
 export function isActive(signals: ActivitySignals): boolean {
   if ((signals.pending ?? 0) > 0) return true
   if (signals.status && signals.status.type !== "idle") return true
-  // Same rule as `sending` below: any status SSE has spoken for is
-  // authoritative, so the cold-start guess only bridges the no-event gap.
-  if (signals.inferred && !signals.status) return true
+  // Server-data guess: lights the row even over an idle record, because the
+  // guess is only written when that record is suspected stale. Misfires are
+  // bounded: a real status event retires the guess, and the next list load
+  // recomputes it wholesale.
+  if (signals.inferred) return true
   // SSE status is the source of truth: sending only counts while the server
   // has not reported a status yet — same rule StatusIndicator uses. The
   // documented trade-off: a second send on a session whose status is already
@@ -55,6 +60,32 @@ export function activePriority(signals: ActivitySignals): number {
 // signals "possibly running", so a missing hint must never read as busy.
 export function inferredActiveFromTime(updated: number, idle: number | undefined): boolean {
   return idle !== undefined && updated > idle
+}
+
+// Split a session list into directly-inferred actives (v2 time hint) and the
+// candidates that need a message-tail probe (v1 servers, or a v2 session
+// without time.idle). Busy/retry records are SSE-authoritative and never
+// guessed over; an idle record does NOT disqualify a session — its busy event
+// may have been lost to a dropped connection, which is exactly what this
+// inference recovers (both cold start and post-reconnect resync).
+export function planActivityInference(
+  sessions: Session[],
+  statusOf: (id: string) => ActivityStatus | undefined,
+): { inferred: Record<string, boolean>; probe: Session[] } {
+  const inferred: Record<string, boolean> = {}
+  const probe: Session[] = []
+  for (const session of sessions) {
+    const status = statusOf(session.id)
+    if (status && status.type !== "idle") continue
+    if (session.time.idle !== undefined) {
+      if (inferredActiveFromTime(session.time.updated, session.time.idle)) {
+        inferred[session.id] = true
+      }
+      continue
+    }
+    probe.push(session)
+  }
+  return { inferred, probe }
 }
 
 // Stable active-first ordering: priority decides, original position breaks
