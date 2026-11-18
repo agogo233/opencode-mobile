@@ -12,6 +12,8 @@ export interface TailscaleStatus {
   error: string
   forwardCount: number
   addresses: { ipv4: string; ipv6: string }
+  // Approval link for a pending keyless enrollment (empty otherwise).
+  loginUrl?: string
 }
 
 export interface TailscaleForward {

@@ -66,7 +66,7 @@ export default function AddConnectionScreen() {
     return `${scheme}://${host}:${finalPort}`
   }
 
-  const tailscaleConfigured = tailscale.authKey.trim() !== ""
+  const tailscaleConfigured = tailscale.authKey.trim() !== "" || tailscale.controlUrl.trim() !== ""
 
   const warnTailscaleConfig = () => {
     Alert.alert(

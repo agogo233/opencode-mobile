@@ -50,7 +50,7 @@
         "controlUrl": "控制服务器地址",
         "controlUrlHint": "你的 Headscale（或 Tailscale）控制服务器，例如 https://headscale.example.com；留空则使用官方 Tailscale 网络。",
         "authKey": "Auth Key",
-        "authKeyHint": "首次连接必需；保存在 Android Keystore 中",
+        "authKeyHint": "可选项；留空则启动后在控制服务器网页上确认注册。保存在 Android Keystore 中",
         "hostnameLabel": "tailnet 中的节点名",
         "hostnameHint": "留空则自动生成",
         "start": "启动",
@@ -59,12 +59,16 @@
         "starting": "启动中…",
         "stopping": "停止中…",
         "notConfiguredTitle": "Tailscale 尚未配置",
-        "notConfigured": "请先填写 Auth Key。",
+        "notConfigured": "请先填写 Auth Key 或控制服务器地址。",
+        "loginPendingTitle": "等待授权",
+        "loginPendingHint": "打开链接并在控制服务器网页上确认这台设备（登录或使用 API Key）。需要 Headscale 0.23+。",
+        "loginOpen": "打开授权页",
+        "loginCopy": "复制链接",
         "insecureControlTitle": "使用 HTTP 控制服务器？",
         "insecureControlMessage": "控制服务器地址使用 http://，Auth Key 将明文传输。请仅在可信内网环境继续。",
-        "help": "首次连接需要来自 Tailscale 或 Headscale 管理员的 Auth Key。节点身份会保存在本机，之后启动会自动重连。到 opencode 服务器的流量经由你的 tailnet 端到端加密。",
+        "help": "首次连接可使用 Auth Key，也可在控制服务器网页上交互式确认（Headscale 0.23+）。节点身份会保存在本机，之后启动会自动重连。到 opencode 服务器的流量经由你的 tailnet 端到端加密。",
         "errors": {
-          "authKeyRequired": "启动 Tailscale 需要先填写 Auth Key。",
+          "configRequired": "启动 Tailscale 需要先填写 Auth Key 或控制服务器地址。",
           "moduleUnavailable": "当前平台不支持 Tailscale。"
         }
       }

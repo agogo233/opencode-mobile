@@ -20,6 +20,8 @@ interface TailscaleState {
   ipv4: string
   ipv6: string
   error: string
+  // Approval link while a keyless enrollment is pending; empty otherwise.
+  loginUrl: string
   // Persisted identity config (SecureStore)
   controlUrl: string
   authKey: string
@@ -75,8 +77,8 @@ async function doStart(): Promise<boolean> {
     return false
   }
   const { controlUrl, authKey, deviceName } = useTailscale.getState()
-  if (!authKey) {
-    useTailscale.setState({ phase: "error", error: i18n.t("settings.tailscale.page.errors.authKeyRequired") })
+  if (!authKey && !controlUrl) {
+    useTailscale.setState({ phase: "error", error: i18n.t("settings.tailscale.page.errors.configRequired") })
     return false
   }
   // Starting (re)creates the node: any existing loopback forward dies with
@@ -87,9 +89,26 @@ async function doStart(): Promise<boolean> {
   if (staleForwardId) void native.stopForward(staleForwardId).catch(() => {})
   useTailscale.setState({ busy: true, error: "" })
   try {
-    const status = await native.start(controlUrl, authKey, deviceName)
-    useTailscale.setState(applyStatus(status))
-    return status.phase === "connected"
+    if (authKey) {
+      const status = await native.start(controlUrl, authKey, deviceName)
+      useTailscale.setState(applyStatus(status))
+      return status.phase === "connected"
+    }
+    // Keyless interactive enrollment blocks the native call for minutes while
+    // the user approves the node in the control server's web UI. Fire and
+    // forget so the serial op chain stays free; progress is tracked via the
+    // status polling (phase "connecting" + loginUrl).
+    void native
+      .start(controlUrl, "", deviceName)
+      .then((status) => {
+        useTailscale.setState(applyStatus(status))
+      })
+      .catch(() => {
+        // Surface the native side's final state (error or stopped) instead of
+        // the raw rejection text.
+        void useTailscale.getState().refresh().catch(() => {})
+      })
+    return true
   } catch (error) {
     useTailscale.setState({ phase: "error", error: error instanceof Error ? error.message : String(error) })
     return false
@@ -125,13 +144,17 @@ async function doReleaseForward(): Promise<void> {
 async function doEnsureForward(targetUrl: string): Promise<number | null> {
   const native = tailscaleNative()
   if (!native) return null
-  const { authKey } = useTailscale.getState()
+  const { authKey, controlUrl } = useTailscale.getState()
   let status = await native.status().catch(() => null)
   if (!status || status.phase !== "connected") {
-    if (!authKey) return null
+    // An enrollment or connect attempt is already in flight; let it finish
+    // (status polling drives the UI) instead of stacking another start.
+    if (status?.phase === "connecting") return null
+    if (!authKey && !controlUrl) return null
     const ok = await doStart()
     if (!ok) return null
     status = await native.status().catch(() => null)
+    if (!status || status.phase !== "connected") return null
   }
   // Reuse the existing forward only when the node still reports it alive. A
   // forward whose accept loop died (or that vanished with a restarted node)
@@ -157,6 +180,7 @@ function applyStatus(status: TailscaleStatus) {
     ipv4: status.addresses?.ipv4 ?? "",
     ipv6: status.addresses?.ipv6 ?? "",
     error: status.error ?? "",
+    loginUrl: status.loginUrl ?? "",
   }
 }
 
@@ -166,6 +190,7 @@ export const useTailscale = create<TailscaleState>((set) => ({
   ipv4: "",
   ipv6: "",
   error: "",
+  loginUrl: "",
   controlUrl: "",
   authKey: "",
   deviceName: "",

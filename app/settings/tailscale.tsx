@@ -9,6 +9,7 @@ import {
   useColorScheme,
   Platform,
   Alert,
+  Linking,
 } from "react-native"
 import { KeyboardAvoidingView } from "react-native-keyboard-controller"
 import { Ionicons } from "@expo/vector-icons"
@@ -29,7 +30,7 @@ export default function TailscaleSettingsScreen() {
   const isDark = colorScheme === "dark"
   const { t } = useTranslation()
 
-  const { phase, ipv4, ipv6, error, controlUrl, authKey, deviceName, busy, loadConfig, saveConfig, start, stop, refresh } =
+  const { phase, ipv4, ipv6, error, loginUrl, controlUrl, authKey, deviceName, busy, loadConfig, saveConfig, start, stop, refresh } =
     useTailscale()
 
   const [controlUrlInput, setControlUrlInput] = useState("")
@@ -38,6 +39,7 @@ export default function TailscaleSettingsScreen() {
   const [showKey, setShowKey] = useState(false)
   const [hydrated, setHydrated] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [loginCopied, setLoginCopied] = useState(false)
 
   useEffect(() => {
     loadConfig()
@@ -62,8 +64,9 @@ export default function TailscaleSettingsScreen() {
   }, [])
 
   // The control URL is optional: an empty value targets the official
-  // Tailscale coordination server. Only the auth key is required.
-  const configured = authKeyInput.trim() !== ""
+  // Tailscale coordination server. The auth key is optional too: leave it
+  // empty to approve the node interactively in the control server's web UI.
+  const configured = authKeyInput.trim() !== "" || controlUrlInput.trim() !== ""
   const connected = phase === "connected"
   const dotColor = PHASE_COLORS[phase] ?? (isDark ? "#666666" : "#999999")
 
@@ -100,6 +103,17 @@ export default function TailscaleSettingsScreen() {
       await Clipboard.setStringAsync(value)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // clipboard optional
+    }
+  }
+
+  const copyLoginUrl = async () => {
+    if (!loginUrl) return
+    try {
+      await Clipboard.setStringAsync(loginUrl)
+      setLoginCopied(true)
+      setTimeout(() => setLoginCopied(false), 1500)
     } catch {
       // clipboard optional
     }
@@ -157,6 +171,36 @@ export default function TailscaleSettingsScreen() {
           )}
           {error !== "" && <Text style={styles.errorText}>{error}</Text>}
         </View>
+
+        {/* Pending keyless enrollment: surface the approval link */}
+        {phase === "connecting" && loginUrl !== "" && (
+          <View style={[styles.card, styles.loginCard, isDark && styles.cardDark]}>
+            <Text style={[styles.label, isDark && styles.labelDark]}>
+              {t("settings.tailscale.page.loginPendingTitle")}
+            </Text>
+            <Text style={[styles.hint, isDark && styles.hintDark]}>
+              {t("settings.tailscale.page.loginPendingHint")}
+            </Text>
+            <Text style={[styles.loginUrl, isDark && styles.textDark]} numberOfLines={1} ellipsizeMode="middle">
+              {loginUrl}
+            </Text>
+            <View style={styles.loginActions}>
+              <TouchableOpacity
+                style={styles.loginButton}
+                onPress={() => {
+                  Linking.openURL(loginUrl).catch(() => {})
+                }}
+              >
+                <Text style={styles.loginButtonText}>{t("settings.tailscale.page.loginOpen")}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.loginButton, styles.loginButtonSecondary]} onPress={copyLoginUrl}>
+                <Text style={[styles.loginButtonText, styles.loginButtonTextSecondary, isDark && styles.textDark]}>
+                  {loginCopied ? t("settings.tailscale.page.copied") : t("settings.tailscale.page.loginCopy")}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Identity */}
         <Text style={[styles.sectionTitle, isDark && styles.textDark]}>{t("settings.tailscale.page.identityTitle")}</Text>
@@ -297,6 +341,38 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 13,
     color: "#ef4444",
+  },
+  loginCard: {
+    borderWidth: 1,
+    borderColor: "#3b82f6",
+  },
+  loginUrl: {
+    fontSize: 12,
+    color: "#0a0a0a",
+    fontFamily: "monospace",
+  },
+  loginActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  loginButton: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: "#3b82f6",
+  },
+  loginButtonSecondary: {
+    backgroundColor: "#e0e7ff",
+  },
+  loginButtonText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#ffffff",
+  },
+  loginButtonTextSecondary: {
+    color: "#1e40af",
   },
   label: {
     fontSize: 14,

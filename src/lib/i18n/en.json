@@ -50,7 +50,7 @@
         "controlUrl": "Control server URL",
         "controlUrlHint": "Your Headscale (or Tailscale) control server, e.g. https://headscale.example.com. Leave empty to use the official Tailscale network.",
         "authKey": "Auth key",
-        "authKeyHint": "Required for the first connect; stored in the Android Keystore",
+        "authKeyHint": "Optional. Leave empty to approve this device in your control server's web UI instead; stored in the Android Keystore",
         "hostnameLabel": "Node name on the tailnet",
         "hostnameHint": "Leave blank to auto-generate",
         "start": "Start",
@@ -59,12 +59,16 @@
         "starting": "Starting…",
         "stopping": "Stopping…",
         "notConfiguredTitle": "Tailscale is not set up",
-        "notConfigured": "Enter your auth key first.",
+        "notConfigured": "Enter your auth key or control server URL first.",
+        "loginPendingTitle": "Approval required",
+        "loginPendingHint": "Open the link and approve this device in your control server's web UI (sign in or use an API key). Headscale 0.23+ required.",
+        "loginOpen": "Open approval page",
+        "loginCopy": "Copy link",
         "insecureControlTitle": "Use an HTTP control server?",
         "insecureControlMessage": "The control server URL uses http://, so your auth key would travel unencrypted. Only continue on a trusted internal network.",
-        "help": "The first connect needs an auth key from your Tailscale or Headscale admin. The node identity is kept on this device, so later starts reconnect automatically. Traffic to the opencode server is end-to-end encrypted through your tailnet.",
+        "help": "The first connect uses an auth key, or interactive approval in your control server's web UI (Headscale 0.23+). The node identity is kept on this device, so later starts reconnect automatically. Traffic to the opencode server is end-to-end encrypted through your tailnet.",
         "errors": {
-          "authKeyRequired": "An auth key is required to start Tailscale.",
+          "configRequired": "Enter an auth key or a control server URL to start Tailscale.",
           "moduleUnavailable": "Tailscale is unavailable on this platform."
         }
       }
