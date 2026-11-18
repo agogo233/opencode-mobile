@@ -65,6 +65,13 @@ jobs:
       ARCHIVEBOX_URL: ${{ secrets.ARCHIVEBOX_URL }}
       ARCHIVEBOX_API_KEY: ${{ secrets.ARCHIVEBOX_API_KEY }}
     steps:
+      - name: Guard — Azure OpenAI secrets required
+        run: |
+          if [ -z "$AZURE_OPENAI_API_KEY" ] || [ -z "$AZURE_OPENAI_ENDPOINT" ]; then
+            echo "::error::AZURE_OPENAI_API_KEY / AZURE_OPENAI_ENDPOINT are not set on this repository. The CUA vision-model loop cannot run without them. Add both under Settings → Secrets and variables → Actions (values: the Azure AI Services endpoint + key used by scripts/android-cua-smoke.py), then re-run this workflow."
+            exit 1
+          fi
+
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
