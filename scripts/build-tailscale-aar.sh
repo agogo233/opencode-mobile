@@ -35,7 +35,7 @@ mkdir -p android/app/libs
 (
   cd native/tailscale-go
   gomobile bind \
-    -target=android/arm64,android/x86_64 \
+    -target=android/arm64,android/amd64 \
     -androidapi 26 \
     -ldflags "-s -w" \
     -o ../../android/app/libs/mobiletsnet.aar \
