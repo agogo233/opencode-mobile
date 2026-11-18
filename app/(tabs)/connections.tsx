@@ -1,5 +1,6 @@
+import { useCallback } from "react"
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, useColorScheme, Alert } from "react-native"
-import { router } from "expo-router"
+import { router, useFocusEffect } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useConnections } from "../../src/stores/connections"
@@ -121,6 +122,14 @@ export default function ConnectionsScreen() {
 
   const { connections, activeConnection, setActiveConnection, removeConnection } = useConnections()
   const { pageSize, setPageSize } = useSettings()
+
+  // Refresh the embedded node status whenever the list is shown — the store's
+  // phase can go stale while the user is elsewhere (no event bus on the Go side).
+  useFocusEffect(
+    useCallback(() => {
+      void useTailscale.getState().refresh()
+    }, []),
+  )
 
   const handleDelete = (connection: ServerConnection) => {
     Alert.alert(

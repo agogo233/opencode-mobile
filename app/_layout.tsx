@@ -98,6 +98,11 @@ function RootLayout() {
     const sub = AppState.addEventListener("change", (next) => {
       if (next === "active" && sseStarted.current) {
         useEvents.getState().reconnectNow()
+        // The embedded node may have been torn down while backgrounded; pull
+        // a fresh status so the disconnected banner reflects reality. Note
+        // the Go side caches its phase, so this catches store/node state
+        // divergence, not silent tailnet drops.
+        useTailscale.getState().refresh()
       }
     })
     return () => sub.remove()
