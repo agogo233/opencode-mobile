@@ -6,6 +6,8 @@ import { createClient, probeServer, type Client, type Project } from "../lib/sdk
 import type { ServerApi } from "../lib/api-detect"
 import { buildAuth } from "../lib/auth"
 import { stripTrailingSlash } from "../lib/path-utils"
+import i18n from "../lib/i18n/config"
+import { resolveBaseUrl as resolveClientBaseUrl, TailscaleUnavailableError } from "../lib/resolve-base-url"
 import { useTailscale } from "./tailscale"
 
 const CONNECTIONS_KEY = "opencode_connections"
@@ -64,10 +66,17 @@ function generateId(): string {
 // Resolve the URL a client should actually talk to. Tailscale-type connections
 // go through the embedded tsnet forwarder on loopback (auto-starting the node
 // when needed); every other type connects to the configured URL directly.
+// Fails closed: when the forward is unavailable the caller gets a
+// TailscaleUnavailableError (localized) instead of a direct, untunneled URL.
 async function resolveBaseUrl(connection: Pick<ServerConnection, "type" | "url">): Promise<string> {
-  if (connection.type !== "tailscale") return connection.url
-  const port = await useTailscale.getState().ensureForward(connection.url)
-  return port ? `http://127.0.0.1:${port}` : connection.url
+  try {
+    return await resolveClientBaseUrl(connection, useTailscale.getState().ensureForward)
+  } catch (error) {
+    if (error instanceof TailscaleUnavailableError) {
+      throw new TailscaleUnavailableError(i18n.t("errors.tailscaleUnavailable"))
+    }
+    throw error
+  }
 }
 
 function buildClient(
@@ -183,9 +192,14 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
               serverHome: home,
               tailscaleConnecting: false,
             })
-          } catch {
+          } catch (error) {
             if (get().activeConnection?.id === active.id) {
-              set({ client: null, clientBase: null, tailscaleConnecting: false, error: "errors.loadConnections" })
+              set({
+                client: null,
+                clientBase: null,
+                tailscaleConnecting: false,
+                error: error instanceof TailscaleUnavailableError ? error.message : "errors.loadConnections",
+              })
             }
           }
         }
@@ -276,24 +290,35 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
 
     if (newConnection.active) {
       activeConnection = newConnection
-      const auth = buildAuth(newConnection.username, password)
-      const baseUrl = await resolveBaseUrl(newConnection)
-      const { api } = await resolveApi(newConnection, auth, baseUrl)
-      const built = buildClient(baseUrl, newConnection.directory, auth, api)
-      client = built.client
-      base = built.base
-
-      // Fetch server metadata so loadSessions can use clientForDirectory(serverHome)
-      // immediately after the connection is added (same as setActiveConnection does).
       try {
-        const [proj, paths] = await Promise.all([
-          client.project.current().catch(() => null),
-          client.path.get().catch(() => null),
-        ])
-        project = proj
-        serverHome = paths?.home || null
-      } catch {
-        // Server might be unreachable; proceed without metadata
+        const auth = buildAuth(newConnection.username, password)
+        const baseUrl = await resolveBaseUrl(newConnection)
+        const { api } = await resolveApi(newConnection, auth, baseUrl)
+        const built = buildClient(baseUrl, newConnection.directory, auth, api)
+        client = built.client
+        base = built.base
+
+        // Fetch server metadata so loadSessions can use clientForDirectory(serverHome)
+        // immediately after the connection is added (same as setActiveConnection does).
+        try {
+          const [proj, paths] = await Promise.all([
+            client.project.current().catch(() => null),
+            client.path.get().catch(() => null),
+          ])
+          project = proj
+          serverHome = paths?.home || null
+        } catch {
+          // Server might be unreachable; proceed without metadata
+        }
+      } catch (error) {
+        // The connection is already persisted at this point — keep it and let
+        // the UI show the tunnel problem instead of failing the save (which
+        // would invite a duplicate retry).
+        if (!(error instanceof TailscaleUnavailableError)) throw error
+        client = null
+        base = null
+        project = null
+        serverHome = null
       }
     }
 
@@ -323,16 +348,32 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         // Mark new connection as active
         newActive.active = true
         await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
-        const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${newActive.id}`)
-        const auth = buildAuth(newActive.username, password)
-        const baseUrl = await resolveBaseUrl(newActive)
-        const { api, resolved } = await resolveApi(newActive, auth, baseUrl)
-        const built = buildClient(baseUrl, newActive.directory, auth, api)
-        if (resolved) await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
-        set({ connections, activeConnection: newActive, client: built.client, clientBase: built.base, tailscaleConnecting: false })
+        try {
+          const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${newActive.id}`)
+          const auth = buildAuth(newActive.username, password)
+          const baseUrl = await resolveBaseUrl(newActive)
+          const { api, resolved } = await resolveApi(newActive, auth, baseUrl)
+          const built = buildClient(baseUrl, newActive.directory, auth, api)
+          if (resolved) await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
+          set({ connections, activeConnection: newActive, client: built.client, clientBase: built.base, tailscaleConnecting: false })
+        } catch (error) {
+          if (!(error instanceof TailscaleUnavailableError)) throw error
+          set({
+            connections,
+            activeConnection: newActive,
+            client: null,
+            clientBase: null,
+            currentProject: null,
+            serverHome: null,
+            tailscaleConnecting: false,
+          })
+        }
       } else {
         set({ connections, activeConnection: null, client: null, clientBase: null, tailscaleConnecting: false })
       }
+      // Switching away from the embedded node: drop the now-unused loopback
+      // forward so it does not linger for the lifetime of the node.
+      if (newActive?.type !== "tailscale") void useTailscale.getState().releaseForward()
     } else {
       set({ connections })
     }
@@ -355,27 +396,36 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     if (active) {
       const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${active.id}`)
       const auth = buildAuth(active.username, password)
-      const baseUrl = await resolveBaseUrl(active)
-      const { api } = await resolveApi(active, auth, baseUrl)
-      const built = buildClient(baseUrl, active.directory, auth, api)
-      client = built.client
-      base = built.base
-
       try {
-        const [proj, paths] = await Promise.all([
-          client.project.current().catch(() => null),
-          client.path.get().catch(() => null),
-        ])
-        project = proj
-        home = paths?.home || null
-      } catch {
-        // Server might be offline
+        const baseUrl = await resolveBaseUrl(active)
+        const { api } = await resolveApi(active, auth, baseUrl)
+        const built = buildClient(baseUrl, active.directory, auth, api)
+        client = built.client
+        base = built.base
+
+        try {
+          const [proj, paths] = await Promise.all([
+            client.project.current().catch(() => null),
+            client.path.get().catch(() => null),
+          ])
+          project = proj
+          home = paths?.home || null
+        } catch {
+          // Server might be offline
+        }
+      } catch (error) {
+        // Selecting a tailscale connection while its tunnel is down: keep the
+        // selection (banner/diagnostics will explain) instead of crashing the
+        // tap handler with an unhandled rejection.
+        if (!(error instanceof TailscaleUnavailableError)) throw error
       }
 
       // Update last connected time
       active.lastConnected = Date.now()
       await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
     }
+
+    if (active?.type !== "tailscale") void useTailscale.getState().releaseForward()
 
     set({
       connections,
@@ -442,31 +492,46 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       const active = connections.find((c) => c.id === id)!
       const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${id}`)
       const auth = buildAuth(active.username, password)
-      const baseUrl = await resolveBaseUrl(active)
-      const { api, resolved } = await resolveApi(active, auth, baseUrl)
-      const built = buildClient(baseUrl, active.directory, auth, api)
-      if (resolved) await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
       try {
-        const [project, paths] = await Promise.all([
-          built.client.project.current().catch(() => null),
-          built.client.path.get().catch(() => null),
-        ])
+        const baseUrl = await resolveBaseUrl(active)
+        const { api, resolved } = await resolveApi(active, auth, baseUrl)
+        const built = buildClient(baseUrl, active.directory, auth, api)
+        if (resolved) await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
+        try {
+          const [project, paths] = await Promise.all([
+            built.client.project.current().catch(() => null),
+            built.client.path.get().catch(() => null),
+          ])
+          set({
+            connections,
+            activeConnection: active,
+            client: built.client,
+            clientBase: built.base,
+            currentProject: project,
+            serverHome: paths?.home || null,
+            tailscaleConnecting: false,
+          })
+        } catch {
+          set({
+            connections,
+            activeConnection: active,
+            client: built.client,
+            clientBase: built.base,
+            currentProject: null,
+            tailscaleConnecting: false,
+          })
+        }
+      } catch (error) {
+        // Edits to a tailscale connection are saved even when its tunnel is
+        // down; the rebuilt client simply waits for the node to come back.
+        if (!(error instanceof TailscaleUnavailableError)) throw error
         set({
           connections,
           activeConnection: active,
-          client: built.client,
-          clientBase: built.base,
-          currentProject: project,
-          serverHome: paths?.home || null,
-          tailscaleConnecting: false,
-        })
-      } catch {
-        set({
-          connections,
-          activeConnection: active,
-          client: built.client,
-          clientBase: built.base,
+          client: null,
+          clientBase: null,
           currentProject: null,
+          serverHome: null,
           tailscaleConnecting: false,
         })
       }

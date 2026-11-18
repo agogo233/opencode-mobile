@@ -296,6 +296,10 @@ func (f *Forwarder) acceptLoop(ctx context.Context, server *tsnet.Server, item *
 		f.forwardMu.Unlock()
 	}()
 
+	const minBackoff = 100 * time.Millisecond
+	const maxBackoff = time.Second
+	backoff := minBackoff
+	logged := false
 	for {
 		localConn, err := item.listener.Accept()
 		if err != nil {
@@ -304,9 +308,33 @@ func (f *Forwarder) acceptLoop(ctx context.Context, server *tsnet.Server, item *
 				return
 			default:
 			}
-			f.setLastErr(fmt.Errorf("accept forward %s: %w", item.ID, err))
-			return
+			// A closed listener means the forward was stopped on purpose.
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			// Transient accept failures (fd exhaustion and friends) must not
+			// kill the forward: the app would keep dialing a loopback port
+			// nothing serves, with no way to notice or recover. Back off and
+			// retry until the forward is stopped or the context is cancelled.
+			if !logged {
+				f.setLastErr(fmt.Errorf("accept forward %s: %w", item.ID, err))
+				logged = true
+			}
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
 		}
+		logged = false
+		backoff = minBackoff
 		go f.proxy(ctx, server, item, localConn)
 	}
 }

@@ -60,6 +60,8 @@
         "stopping": "Stopping…",
         "notConfiguredTitle": "Tailscale is not set up",
         "notConfigured": "Enter your auth key first.",
+        "insecureControlTitle": "Use an HTTP control server?",
+        "insecureControlMessage": "The control server URL uses http://, so your auth key would travel unencrypted. Only continue on a trusted internal network.",
         "help": "The first connect needs an auth key from your Tailscale or Headscale admin. The node identity is kept on this device, so later starts reconnect automatically. Traffic to the opencode server is end-to-end encrypted through your tailnet.",
         "errors": {
           "authKeyRequired": "An auth key is required to start Tailscale.",
@@ -231,7 +233,8 @@
         "saveFailedMessage": "The connection test succeeded, but saving it failed. Please try again.",
         "tailscaleConfigTitle": "Tailscale is not set up",
         "tailscaleConfigMessage": "Add your auth key in Settings → Tailscale first."
-      }
+      },
+      "tailscaleStartupHint": "The first connection may take up to a minute while the embedded Tailscale node starts."
     },
     "add": {
       "quick": {
@@ -434,6 +437,7 @@
     "restoreRevertedMessages": "Failed to restore reverted messages",
     "sessionErrorOccurred": "Session error occurred",
     "loadConnections": "Failed to load connections",
+    "tailscaleUnavailable": "Tailscale is not connected. Start it in Settings → Tailscale before connecting.",
     "authInitFailed": "Failed to initialize authentication",
     "authFailed": "Authentication failed",
     "authError": "Authentication error"

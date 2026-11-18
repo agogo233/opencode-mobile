@@ -60,6 +60,8 @@
         "stopping": "停止中…",
         "notConfiguredTitle": "Tailscale 尚未配置",
         "notConfigured": "请先填写 Auth Key。",
+        "insecureControlTitle": "使用 HTTP 控制服务器？",
+        "insecureControlMessage": "控制服务器地址使用 http://，Auth Key 将明文传输。请仅在可信内网环境继续。",
         "help": "首次连接需要来自 Tailscale 或 Headscale 管理员的 Auth Key。节点身份会保存在本机，之后启动会自动重连。到 opencode 服务器的流量经由你的 tailnet 端到端加密。",
         "errors": {
           "authKeyRequired": "启动 Tailscale 需要先填写 Auth Key。",
@@ -231,7 +233,8 @@
         "saveFailedMessage": "连接测试成功，但保存失败，请重试。",
         "tailscaleConfigTitle": "Tailscale 尚未配置",
         "tailscaleConfigMessage": "请先在 设置 → Tailscale 中填写 Auth Key。"
-      }
+      },
+      "tailscaleStartupHint": "首次连接需启动内嵌 Tailscale 节点，可能需要约一分钟。"
     },
     "add": {
       "quick": {
@@ -434,6 +437,7 @@
     "restoreRevertedMessages": "恢复已回退消息失败",
     "sessionErrorOccurred": "会话发生错误",
     "loadConnections": "加载连接失败",
+    "tailscaleUnavailable": "Tailscale 未连接。请先在 设置 → Tailscale 中启动节点。",
     "authInitFailed": "初始化身份验证失败",
     "authFailed": "身份验证失败",
     "authError": "身份验证出错"
