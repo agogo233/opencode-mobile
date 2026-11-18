@@ -17,13 +17,44 @@ func TestNewState(t *testing.T) {
 	}
 }
 
-func TestConfigureRequiresAuthAndState(t *testing.T) {
+func TestConfigureAllowsEmptyAuthKey(t *testing.T) {
 	f := New()
-	if err := f.Configure("", "android", t.TempDir()); err == nil {
-		t.Fatal("Configure accepted an empty auth key")
+	if err := f.Configure("", "android", t.TempDir()); err != nil {
+		t.Fatalf("Configure() error = %v", err)
 	}
 	if err := f.Configure("tskey-auth-test", "android", ""); err == nil {
 		t.Fatal("Configure accepted an empty state directory")
+	}
+}
+
+func TestCaptureLoginURL(t *testing.T) {
+	f := New()
+	f.mu.Lock()
+	f.phase = "connecting"
+	f.mu.Unlock()
+
+	f.logf("To authenticate, visit https://headscale.example.com/a/Ab12Cd34.")
+	if got := f.GetLoginURL(); got != "https://headscale.example.com/a/Ab12Cd34" {
+		t.Fatalf("login URL = %q, want the enrollment link", got)
+	}
+	if got := f.Status().LoginURL; got != f.GetLoginURL() {
+		t.Fatalf("Status().LoginURL = %q, want %q", got, f.GetLoginURL())
+	}
+
+	// Unrelated log lines must not touch the captured URL.
+	f.logf("control: https://controlplane.tailscale.com")
+	if got := f.GetLoginURL(); got != "https://headscale.example.com/a/Ab12Cd34" {
+		t.Fatalf("login URL = %q after unrelated log line", got)
+	}
+
+	// Once connected the URL is cleared and stays empty.
+	f.mu.Lock()
+	f.phase = "connected"
+	f.loginURL = ""
+	f.mu.Unlock()
+	f.logf("To authenticate, visit https://headscale.example.com/a/Ab12Cd34.")
+	if got := f.GetLoginURL(); got != "" {
+		t.Fatalf("login URL = %q after connect, want empty", got)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,9 @@ const (
 	defaultDialTimeout    = 15 * time.Second
 	// Keep the on-disk marker name stable so existing node identities can be reused.
 	persistedLoginMarker = ".libtsnet-enrolled"
+	// A first-time keyless enrollment waits for the user to open the approval
+	// URL in the control server's web UI, which can take minutes.
+	enrollmentConnectTimeout = 15 * time.Minute
 )
 
 // State is a stable snapshot suitable for exposing to Android bindings.
@@ -32,6 +36,9 @@ type State struct {
 	LocalAddresses []string
 	ForwardCount   int
 	LastError      string
+	// LoginURL is the approval link for a pending keyless enrollment; empty
+	// when no enrollment is in flight.
+	LoginURL string
 }
 
 // Forward describes one loopback listener and its Tailscale destination.
@@ -60,6 +67,7 @@ type Forwarder struct {
 	stateDir   string
 	phase      string
 	lastErr    string
+	loginURL   string
 	forwards   map[string]*forward
 }
 
@@ -72,7 +80,9 @@ func New() *Forwarder {
 }
 
 // Configure sets the tsnet credentials and persistent state directory.
-// Configuration is rejected while the server is active.
+// Configuration is rejected while the server is active. An empty authKey is
+// allowed: tsnet then performs an interactive login and logs an approval URL
+// (captured for the UI), or restores the previously enrolled identity.
 func (f *Forwarder) Configure(authKey, hostname, stateDir string) error {
 	authKey = strings.TrimSpace(authKey)
 	hostname = strings.TrimSpace(hostname)
@@ -83,14 +93,6 @@ func (f *Forwarder) Configure(authKey, hostname, stateDir string) error {
 	stateDir = filepath.Clean(stateDir)
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("create state directory: %w", err)
-	}
-	if authKey == "" {
-		if _, err := os.Stat(filepath.Join(stateDir, persistedLoginMarker)); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return errors.New("auth key is required for first-time enrollment")
-			}
-			return fmt.Errorf("check existing tsnet state: %w", err)
-		}
 	}
 
 	f.mu.Lock()
@@ -129,31 +131,46 @@ func (f *Forwarder) ConfigureControl(authKey, controlURL, hostname, stateDir str
 	return nil
 }
 
-// Connect starts tsnet and waits for it to become usable.
+// Connect starts tsnet and waits for it to become usable. It blocks the
+// calling thread until the node is connected or the attempt fails. A
+// first-time keyless enrollment gets a long window: the user must open the
+// approval URL (captured by logf) in the control server's web UI, which can
+// take minutes.
 func (f *Forwarder) Connect() (err error) {
+	var server *tsnet.Server
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("connect tsnet panic: %v", recovered)
+			// Best-effort cleanup of an in-flight server. Note: if the panic
+			// happened while holding f.mu, setError below would deadlock —
+			// the locked sections only do field assignments, so this is
+			// treated as a theoretical case (same as the previous design).
+			if server != nil {
+				_ = server.Close()
+			}
 			f.setError(err)
 			err = f.redactErr(err)
 		}
 	}()
 	f.mu.Lock()
 	if f.server != nil {
-		// Idempotent re-entry: report a healthy node instead of the phase a
-		// previous forward-level error left behind.
-		f.phase = "connected"
-		f.lastErr = ""
+		// Idempotent re-entry. A connected node reports healthy; an in-flight
+		// connect/enrollment attempt keeps its phase so status polling can
+		// observe the progress and the captured login URL.
+		if f.phase == "connected" {
+			f.phase = "connected"
+			f.lastErr = ""
+		}
 		f.mu.Unlock()
 		return nil
 	}
-	// An empty auth key is valid when Configure found an enrolled state
-	// directory. tsnet then restores the existing node identity from Dir.
+	// An empty auth key is valid: tsnet performs an interactive login and
+	// prints an approval URL, or restores the persisted node identity from Dir.
 	if f.stateDir == "" {
 		f.mu.Unlock()
 		return errors.New("forwarder is not configured")
 	}
-	server := &tsnet.Server{
+	server = &tsnet.Server{
 		AuthKey:    f.authKey,
 		ControlURL: f.controlURL,
 		Hostname:   f.hostname,
@@ -161,44 +178,60 @@ func (f *Forwarder) Connect() (err error) {
 		Logf:       f.logf,
 		UserLogf:   f.logf,
 	}
+	// Register the in-flight server right away so a concurrent Close() can
+	// cancel a pending enrollment instead of leaking the tsnet process.
+	f.server = server
+	f.phase = "connecting"
+	f.lastErr = ""
+	f.loginURL = ""
+	timeout := defaultConnectTimeout
+	if f.authKey == "" && !f.HasPersistedLogin(f.stateDir) {
+		timeout = enrollmentConnectTimeout
+	}
+	f.mu.Unlock()
+
 	// Android does not provide the Unix cache/temp locations that Tailscale's
 	// log policy normally discovers. Reuse the app-private tsnet directory.
 	if err := os.Setenv("TS_LOGS_DIR", f.stateDir); err != nil {
-		f.mu.Unlock()
-		wrapped := fmt.Errorf("set tsnet log directory: %w", err)
-		f.setError(wrapped)
-		return f.redactErr(wrapped)
+		return f.failInFlight(server, fmt.Errorf("set tsnet log directory: %w", err))
 	}
-	f.phase = "connecting"
-	f.lastErr = ""
-	f.mu.Unlock()
 
 	if err := server.Start(); err != nil {
-		wrapped := fmt.Errorf("start tsnet: %w", err)
-		f.setError(wrapped)
-		return f.redactErr(wrapped)
+		return f.failInFlight(server, fmt.Errorf("start tsnet: %w", err))
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultConnectTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if _, err := server.Up(ctx); err != nil {
-		_ = server.Close()
-		wrapped := fmt.Errorf("bring tsnet up: %w", err)
-		f.setError(wrapped)
-		return f.redactErr(wrapped)
+		return f.failInFlight(server, fmt.Errorf("bring tsnet up: %w", err))
 	}
 	if err := os.WriteFile(filepath.Join(f.stateDir, persistedLoginMarker), nil, 0o600); err != nil {
-		_ = server.Close()
-		wrapped := fmt.Errorf("persist tsnet enrollment marker: %w", err)
-		f.setError(wrapped)
-		return f.redactErr(wrapped)
+		return f.failInFlight(server, fmt.Errorf("persist tsnet enrollment marker: %w", err))
 	}
 
 	f.mu.Lock()
-	f.server = server
-	f.phase = "connected"
-	f.lastErr = ""
+	if f.server == server {
+		f.phase = "connected"
+		f.lastErr = ""
+		f.loginURL = ""
+	}
 	f.mu.Unlock()
 	return nil
+}
+
+// failInFlight tears down a connect attempt that did not reach the connected
+// phase. The forwarder state is only touched when this attempt is still the
+// registered one; a concurrent Close() wins and its outcome is preserved.
+func (f *Forwarder) failInFlight(server *tsnet.Server, wrapped error) error {
+	_ = server.Close()
+	f.mu.Lock()
+	if f.server == server {
+		f.server = nil
+		f.phase = "error"
+		f.lastErr = f.redactLocked(wrapped.Error())
+		f.loginURL = ""
+	}
+	f.mu.Unlock()
+	return f.redactErr(wrapped)
 }
 
 // HasPersistedLogin reports whether a previous Connect completed successfully
@@ -236,7 +269,9 @@ func (f *Forwarder) StartForward(remoteHost string, remotePort, localPort int) (
 	// a concurrent Close cannot slip in between and leak the listener.
 	f.mu.Lock()
 	server := f.server
-	if server == nil {
+	// The in-flight server is registered during connect/enrollment; only a
+	// fully connected node may serve forwards.
+	if server == nil || f.phase != "connected" {
 		f.mu.Unlock()
 		return Forward{}, errors.New("tsnet is not connected")
 	}
@@ -399,6 +434,7 @@ func (f *Forwarder) Status() State {
 		Hostname:     f.hostname,
 		ForwardCount: forwardCount,
 		LastError:    f.lastErr,
+		LoginURL:     f.loginURL,
 	}
 	server := f.server
 	f.mu.RUnlock()
@@ -425,6 +461,10 @@ func (f *Forwarder) GetForwardCount() int { return f.Status().ForwardCount }
 
 // GetLastError returns the last connection or forwarding error.
 func (f *Forwarder) GetLastError() string { return f.Status().LastError }
+
+// GetLoginURL returns the approval URL for a pending keyless enrollment, or
+// an empty string when no enrollment is in flight.
+func (f *Forwarder) GetLoginURL() string { return f.Status().LoginURL }
 
 // GetTailscaleIPv4 returns the first assigned Tailscale IPv4 address.
 func (f *Forwarder) GetTailscaleIPv4() string {
@@ -455,6 +495,7 @@ func (f *Forwarder) Close() {
 	server := f.server
 	f.server = nil
 	f.phase = "closed"
+	f.loginURL = ""
 	f.mu.Unlock()
 	if server != nil {
 		_ = server.Close()
@@ -494,6 +535,11 @@ func (f *Forwarder) redactLocked(msg string) string {
 	return msg
 }
 
+// loginURLPattern matches URLs in tsnet log lines loosely: the enrollment URL
+// format differs between control servers (login.tailscale.com/a/… vs a
+// self-hosted Headscale).
+var loginURLPattern = regexp.MustCompile(`https?://[^\s"'<>]+`)
+
 // logf routes tsnet's own logs through the standard logger while keeping the
 // auth key out of anything that could end up in logcat or the state dir. The
 // message is rendered first and redacted as a whole, so a key embedded in a
@@ -509,5 +555,31 @@ func (f *Forwarder) logf(format string, args ...any) {
 	if secret != "" {
 		msg = strings.ReplaceAll(msg, secret, "[redacted]")
 	}
+	f.captureLoginURL(msg)
 	log.Printf("tsnet: %s", msg)
+}
+
+// captureLoginURL remembers the approval URL that tsnet prints while a keyless
+// first-time enrollment is pending, so the UI can surface it. The URL is not a
+// secret (it is meant to be opened in a browser) and never contains the auth
+// key, so it is safe to show.
+func (f *Forwarder) captureLoginURL(msg string) {
+	lower := strings.ToLower(msg)
+	if !strings.Contains(lower, "/a/") &&
+		!strings.Contains(lower, "authentic") &&
+		!strings.Contains(lower, "register") {
+		return
+	}
+	url := loginURLPattern.FindString(msg)
+	if url == "" {
+		return
+	}
+	url = strings.TrimRight(url, ".,;:)")
+	f.mu.Lock()
+	// Only remember it while an enrollment is in flight; afterwards the URL is
+	// stale and the field is cleared anyway.
+	if f.phase == "connecting" {
+		f.loginURL = url
+	}
+	f.mu.Unlock()
 }
