@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import * as SecureStore from "expo-secure-store"
+import i18n from "../lib/i18n/config"
 import {
   tailscaleNative,
   TAILSCALE_STORAGE_KEYS,
@@ -46,9 +47,10 @@ function randomDeviceName(): string {
   return `opencode-${Math.random().toString(36).slice(2, 6)}`
 }
 
-// Serializes concurrent ensureForward calls for the same target so two
-// interleaved client builds cannot create duplicate loopback forwards.
-let inflightForward: { target: string; promise: Promise<number | null> } | null = null
+// Serialize ALL ensureForward calls (regardless of target) so concurrent
+// client builds can neither create duplicate loopback forwards nor race the
+// stop-then-create swap when the active connection changes.
+let ensureChain: Promise<unknown> = Promise.resolve()
 
 async function doEnsureForward(targetUrl: string): Promise<number | null> {
   const native = tailscaleNative()
@@ -132,14 +134,20 @@ export const useTailscale = create<TailscaleState>((set, get) => ({
   start: async () => {
     const native = tailscaleNative()
     if (!native) {
-      set({ phase: "error", error: "Tailscale module unavailable on this platform" })
+      set({ phase: "error", error: i18n.t("settings.tailscale.page.errors.moduleUnavailable") })
       return false
     }
     const { controlUrl, authKey, deviceName } = get()
     if (!authKey) {
-      set({ phase: "error", error: "auth key required" })
+      set({ phase: "error", error: i18n.t("settings.tailscale.page.errors.authKeyRequired") })
       return false
     }
+    // Starting (re)creates the node: any existing loopback forward dies with
+    // the old node. Drop the stale forward state and release the old listener
+    // explicitly so it cannot leak when the native side skips the rebuild.
+    const staleForwardId = get().forwardId
+    set({ forwardId: null, forwardPort: null, forwardTarget: null })
+    if (staleForwardId) void native.stopForward(staleForwardId).catch(() => {})
     set({ busy: true, error: "" })
     try {
       const status = await native.start(controlUrl, authKey, deviceName)
@@ -170,11 +178,11 @@ export const useTailscale = create<TailscaleState>((set, get) => ({
 
   ensureForward: (targetUrl) => {
     if (get().forwardTarget === targetUrl && get().forwardPort) return Promise.resolve(get().forwardPort)
-    if (inflightForward?.target === targetUrl) return inflightForward.promise
-    const promise = doEnsureForward(targetUrl).finally(() => {
-      if (inflightForward?.promise === promise) inflightForward = null
-    })
-    inflightForward = { target: targetUrl, promise }
-    return promise
+    const run = ensureChain.then(() => doEnsureForward(targetUrl))
+    ensureChain = run.then(
+      () => {},
+      () => {},
+    )
+    return run
   },
 }))

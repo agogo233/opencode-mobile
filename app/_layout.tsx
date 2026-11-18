@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import { Stack, router } from "expo-router"
 import { StatusBar } from "expo-status-bar"
-import { useColorScheme, View, ActivityIndicator, AppState } from "react-native"
+import { useColorScheme, View, Text, ActivityIndicator, AppState, StyleSheet } from "react-native"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet"
@@ -19,6 +19,25 @@ import { ErrorBoundary } from "../src/components/ErrorBoundary"
 import * as notifications from "../src/lib/notifications"
 
 const queryClient = new QueryClient()
+
+// Global indicator shown while the active tailscale connection waits for the
+// embedded node and its loopback forward to come up. Renders on every screen
+// so a slow/unreachable tailnet never looks like a frozen app.
+function TailscaleConnectingBanner() {
+  const colorScheme = useColorScheme()
+  const isDark = colorScheme === "dark"
+  const { t } = useTranslation()
+  const tailscaleConnecting = useConnections((s) => s.tailscaleConnecting)
+  if (!tailscaleConnecting) return null
+  return (
+    <View style={[styles.tsBanner, isDark && styles.tsBannerDark]}>
+      <ActivityIndicator size="small" color={isDark ? "#ffffff" : "#0a0a0a"} />
+      <Text style={[styles.tsBannerText, isDark && styles.tsBannerTextDark]}>
+        {t("connectionsList.tailscaleConnecting")}
+      </Text>
+    </View>
+  )
+}
 
 function RootLayout() {
   const colorScheme = useColorScheme()
@@ -139,43 +158,46 @@ function RootLayout() {
         <BottomSheetModalProvider>
           <QueryClientProvider client={queryClient}>
             <AuthGate>
-            <Stack
-              screenOptions={{
-                headerStyle: {
-                  backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
-                },
-                headerTintColor: isDark ? "#ffffff" : "#0a0a0a",
-                contentStyle: {
-                  backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
-                },
-              }}
-            >
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen
-                name="session/[id]"
-                options={{
-                  title: t("session.titleFallback"),
-                  presentation: "card",
+            <View style={styles.flex}>
+              <TailscaleConnectingBanner />
+              <Stack
+                screenOptions={{
+                  headerStyle: {
+                    backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
+                  },
+                  headerTintColor: isDark ? "#ffffff" : "#0a0a0a",
+                  contentStyle: {
+                    backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
+                  },
                 }}
-              />
-              <Stack.Screen
-                name="connection/add"
-                options={{
-                  title: t("nav.addConnectionTitle"),
-                  presentation: "modal",
-                }}
-              />
-              <Stack.Screen
-                name="connection/[id]"
-                options={{
-                  title: t("nav.editConnectionTitle"),
-                  presentation: "modal",
-                }}
-              />
-              <Stack.Screen name="file-browser" options={{ title: t("fileBrowser.title") }} />
-              <Stack.Screen name="file-preview" options={{ title: t("filePreview.title") }} />
-              <Stack.Screen name="settings/tailscale" options={{ title: t("settings.tailscale.page.title") }} />
-            </Stack>
+              >
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen
+                  name="session/[id]"
+                  options={{
+                    title: t("session.titleFallback"),
+                    presentation: "card",
+                  }}
+                />
+                <Stack.Screen
+                  name="connection/add"
+                  options={{
+                    title: t("nav.addConnectionTitle"),
+                    presentation: "modal",
+                  }}
+                />
+                <Stack.Screen
+                  name="connection/[id]"
+                  options={{
+                    title: t("nav.editConnectionTitle"),
+                    presentation: "modal",
+                  }}
+                />
+                <Stack.Screen name="file-browser" options={{ title: t("fileBrowser.title") }} />
+                <Stack.Screen name="file-preview" options={{ title: t("filePreview.title") }} />
+                <Stack.Screen name="settings/tailscale" options={{ title: t("settings.tailscale.page.title") }} />
+              </Stack>
+            </View>
               <StatusBar style={isDark ? "light" : "dark"} />
             </AuthGate>
           </QueryClientProvider>
@@ -186,5 +208,33 @@ function RootLayout() {
     </ErrorBoundary>
   )
 }
+
+const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
+  tsBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: "#fffbeb",
+    borderBottomWidth: 1,
+    borderBottomColor: "#fde68a",
+  },
+  tsBannerDark: {
+    backgroundColor: "#2a2110",
+    borderBottomColor: "#4a3b15",
+  },
+  tsBannerText: {
+    fontSize: 13,
+    color: "#92400e",
+    flex: 1,
+  },
+  tsBannerTextDark: {
+    color: "#fbbf24",
+  },
+})
 
 export default RootLayout

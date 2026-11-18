@@ -35,6 +35,9 @@ interface ConnectionsState {
   serverHome: string | null // Home directory on the server machine (for ~ expansion)
   recentDirectories: string[]
   isLoading: boolean
+  // True while the active tailscale connection waits for the embedded node
+  // and its loopback forward to come up (first paint must not block on it).
+  tailscaleConnecting: boolean
   error: string | null
 
   // Actions
@@ -108,6 +111,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   currentProject: null,
   recentDirectories: [],
   isLoading: true,
+  tailscaleConnecting: false,
   error: null,
 
   loadConnections: async () => {
@@ -122,6 +126,83 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
 
       // Find active connection
       const active = connections.find((c) => c.active) || null
+
+      // A tailscale active connection must not block first paint on node
+      // bring-up (which can take up to a minute when the tailnet is slow or
+      // unreachable). Render immediately with an explicit "connecting via
+      // Tailscale" indicator; the client is built in the background once the
+      // loopback forward is ready.
+      if (active?.type === "tailscale") {
+        const buildTailscaleClient = async () => {
+          try {
+            // Auto-start needs the persisted identity; loadConfig may still
+            // be in flight on cold start, so make sure it has run.
+            const ts = useTailscale.getState()
+            if (!ts.configLoaded) await ts.loadConfig()
+            const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${active.id}`)
+            const auth = buildAuth(active.username, password)
+            const baseUrl = await resolveBaseUrl(active)
+            // The bring-up window can last a minute or more; the user may have
+            // edited or switched connections in the meantime. Only proceed if
+            // the stored record still matches what this build was started for.
+            const current = get().connections.find((c) => c.id === active.id)
+            if (!current || current.url !== active.url || current.directory !== active.directory) return
+            const { api, resolved } = await resolveApi(current, auth, baseUrl)
+            const built = buildClient(baseUrl, current.directory, auth, api)
+            if (resolved) {
+              // Merge only this connection's probe fields into the latest
+              // stored list — a whole-list write-back of the cold-start
+              // snapshot would roll back edits made while the node came up.
+              const raw = await SecureStore.getItemAsync(CONNECTIONS_KEY)
+              const latest: ServerConnection[] = raw ? JSON.parse(raw) : connections
+              const idx = latest.findIndex((c) => c.id === current.id)
+              if (idx >= 0) {
+                latest[idx] = { ...latest[idx], api: current.api, serverVersion: current.serverVersion }
+                await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(latest))
+              }
+            }
+            let project: Project | null = null
+            let home: string | null = null
+            try {
+              const [proj, paths] = await Promise.all([
+                built.client.project.current().catch(() => null),
+                built.client.path.get().catch(() => null),
+              ])
+              project = proj
+              home = paths?.home || null
+            } catch {
+              // Server might be offline
+            }
+            // The user may have switched connections while the node was coming
+            // up; only apply results that still belong to the active one.
+            if (get().activeConnection?.id !== active.id) return
+            set({
+              client: built.client,
+              clientBase: built.base,
+              currentProject: project,
+              serverHome: home,
+              tailscaleConnecting: false,
+            })
+          } catch {
+            if (get().activeConnection?.id === active.id) {
+              set({ client: null, clientBase: null, tailscaleConnecting: false, error: "errors.loadConnections" })
+            }
+          }
+        }
+        set({
+          connections,
+          activeConnection: active,
+          client: null,
+          clientBase: null,
+          currentProject: null,
+          serverHome: null,
+          recentDirectories,
+          isLoading: false,
+          tailscaleConnecting: true,
+        })
+        void buildTailscaleClient()
+        return
+      }
 
       // Create client for active connection
       let client: Client | null = null
@@ -161,9 +242,10 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         serverHome: home,
         recentDirectories,
         isLoading: false,
+        tailscaleConnecting: false,
       })
     } catch (error) {
-      set({ error: "errors.loadConnections", isLoading: false })
+      set({ error: "errors.loadConnections", isLoading: false, tailscaleConnecting: false })
     }
   },
 
@@ -215,7 +297,15 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       }
     }
 
-    set({ connections, activeConnection, client, clientBase: base, currentProject: project, serverHome })
+    set({
+      connections,
+      activeConnection,
+      client,
+      clientBase: base,
+      currentProject: project,
+      serverHome,
+      ...(newConnection.active ? { tailscaleConnecting: false } : {}),
+    })
   },
 
   removeConnection: async (id) => {
@@ -239,9 +329,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         const { api, resolved } = await resolveApi(newActive, auth, baseUrl)
         const built = buildClient(baseUrl, newActive.directory, auth, api)
         if (resolved) await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
-        set({ connections, activeConnection: newActive, client: built.client, clientBase: built.base })
+        set({ connections, activeConnection: newActive, client: built.client, clientBase: built.base, tailscaleConnecting: false })
       } else {
-        set({ connections, activeConnection: null, client: null, clientBase: null })
+        set({ connections, activeConnection: null, client: null, clientBase: null, tailscaleConnecting: false })
       }
     } else {
       set({ connections })
@@ -287,7 +377,15 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
     }
 
-    set({ connections, activeConnection: active, client, clientBase: base, currentProject: project, serverHome: home })
+    set({
+      connections,
+      activeConnection: active,
+      client,
+      clientBase: base,
+      currentProject: project,
+      serverHome: home,
+      tailscaleConnecting: false,
+    })
   },
 
   testConnection: async (connection, password) => {
@@ -360,6 +458,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
           clientBase: built.base,
           currentProject: project,
           serverHome: paths?.home || null,
+          tailscaleConnecting: false,
         })
       } catch {
         set({
@@ -368,6 +467,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
           client: built.client,
           clientBase: built.base,
           currentProject: null,
+          tailscaleConnecting: false,
         })
       }
     } else {

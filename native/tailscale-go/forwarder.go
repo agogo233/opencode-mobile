@@ -135,6 +135,7 @@ func (f *Forwarder) Connect() (err error) {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("connect tsnet panic: %v", recovered)
 			f.setError(err)
+			err = f.redactErr(err)
 		}
 	}()
 	f.mu.Lock()
@@ -166,28 +167,30 @@ func (f *Forwarder) Connect() (err error) {
 		f.mu.Unlock()
 		wrapped := fmt.Errorf("set tsnet log directory: %w", err)
 		f.setError(wrapped)
-		return wrapped
+		return f.redactErr(wrapped)
 	}
 	f.phase = "connecting"
 	f.lastErr = ""
 	f.mu.Unlock()
 
 	if err := server.Start(); err != nil {
-		f.setError(fmt.Errorf("start tsnet: %w", err))
-		return err
+		wrapped := fmt.Errorf("start tsnet: %w", err)
+		f.setError(wrapped)
+		return f.redactErr(wrapped)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultConnectTimeout)
 	defer cancel()
 	if _, err := server.Up(ctx); err != nil {
 		_ = server.Close()
-		f.setError(fmt.Errorf("bring tsnet up: %w", err))
-		return err
+		wrapped := fmt.Errorf("bring tsnet up: %w", err)
+		f.setError(wrapped)
+		return f.redactErr(wrapped)
 	}
 	if err := os.WriteFile(filepath.Join(f.stateDir, persistedLoginMarker), nil, 0o600); err != nil {
 		_ = server.Close()
 		wrapped := fmt.Errorf("persist tsnet enrollment marker: %w", err)
 		f.setError(wrapped)
-		return wrapped
+		return f.redactErr(wrapped)
 	}
 
 	f.mu.Lock()
@@ -438,6 +441,14 @@ func (f *Forwarder) setError(err error) {
 	f.mu.Unlock()
 }
 
+// redactErr returns a copy of err's message with the auth key stripped, safe
+// to hand across the binding boundary into UI-visible error text.
+func (f *Forwarder) redactErr(err error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return errors.New(f.redactLocked(err.Error()))
+}
+
 // setLastErr records a forward-level failure (one loopback pipe or one dial)
 // without touching the node lifecycle phase: the tailnet node is still up, so
 // a single unreachable target must not make the UI restart the whole node.
@@ -456,21 +467,19 @@ func (f *Forwarder) redactLocked(msg string) string {
 }
 
 // logf routes tsnet's own logs through the standard logger while keeping the
-// auth key out of anything that could end up in logcat or the state dir.
+// auth key out of anything that could end up in logcat or the state dir. The
+// message is rendered first and redacted as a whole, so a key embedded in a
+// non-string argument (e.g. an error value) is covered too.
 func (f *Forwarder) logf(format string, args ...any) {
 	f.mu.RLock()
 	secret := f.authKey
 	f.mu.RUnlock()
-	if secret != "" {
-		format = strings.ReplaceAll(format, secret, "[redacted]")
-		redacted := make([]any, len(args))
-		for i, arg := range args {
-			if s, ok := arg.(string); ok {
-				arg = strings.ReplaceAll(s, secret, "[redacted]")
-			}
-			redacted[i] = arg
-		}
-		args = redacted
+	msg := format
+	if len(args) > 0 {
+		msg = fmt.Sprintf(format, args...)
 	}
-	log.Printf("tsnet: "+format, args...)
+	if secret != "" {
+		msg = strings.ReplaceAll(msg, secret, "[redacted]")
+	}
+	log.Printf("tsnet: %s", msg)
 }

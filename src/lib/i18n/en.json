@@ -48,7 +48,7 @@
         "deviceName": "Node name",
         "identityTitle": "Identity",
         "controlUrl": "Control server URL",
-        "controlUrlHint": "Your Headscale (or Tailscale) control server, e.g. https://headscale.example.com",
+        "controlUrlHint": "Your Headscale (or Tailscale) control server, e.g. https://headscale.example.com. Leave empty to use the official Tailscale network.",
         "authKey": "Auth key",
         "authKeyHint": "Required for the first connect; stored in the Android Keystore",
         "hostnameLabel": "Node name on the tailnet",
@@ -59,8 +59,12 @@
         "starting": "Starting…",
         "stopping": "Stopping…",
         "notConfiguredTitle": "Tailscale is not set up",
-        "notConfigured": "Enter the control server URL and an auth key first.",
-        "help": "The first connect needs an auth key from your Tailscale or Headscale admin. The node identity is kept on this device, so later starts reconnect automatically. Traffic to the opencode server is end-to-end encrypted through your tailnet."
+        "notConfigured": "Enter your auth key first.",
+        "help": "The first connect needs an auth key from your Tailscale or Headscale admin. The node identity is kept on this device, so later starts reconnect automatically. Traffic to the opencode server is end-to-end encrypted through your tailnet.",
+        "errors": {
+          "authKeyRequired": "An auth key is required to start Tailscale.",
+          "moduleUnavailable": "Tailscale is unavailable on this platform."
+        }
       }
     },
     "security": {
@@ -226,7 +230,7 @@
         "saveFailedTitle": "Couldn't Save Connection",
         "saveFailedMessage": "The connection test succeeded, but saving it failed. Please try again.",
         "tailscaleConfigTitle": "Tailscale is not set up",
-        "tailscaleConfigMessage": "Add your control server URL and auth key in Settings → Tailscale first."
+        "tailscaleConfigMessage": "Add your auth key in Settings → Tailscale first."
       }
     },
     "add": {
@@ -240,7 +244,7 @@
         "passwordPlaceholder": "Leave empty if none",
         "viaTailscale": "Connect through built-in Tailscale",
         "viaTailscaleHint": "Traffic goes through the app's embedded encrypted tailnet node — no separate Tailscale app needed",
-        "tailscaleSetupHint": "Set up Tailscale first: add your control server URL and auth key.",
+        "tailscaleSetupHint": "Set up Tailscale first: add your auth key.",
         "usernameHintPrefix": "Username defaults to ",
         "usernameHintMiddle": ". Custom username? Use ",
         "usernameHintSuffix": ".",
@@ -295,8 +299,8 @@
       "timeout": "Connection to the server timed out (dropped, not refused). Likely a firewall, wrong port, or Tailscale ACL blocking the device.",
       "serverUnreachable": "Internet works, but the server at {{host}}:{{port}} is unreachable. Confirm the opencode server is running, the device is on the same tailnet, and the port is correct.",
       "serverUnreachableDns": "Internet works, but the server at {{host}}:{{port}} is unreachable. Hostname may not resolve from this device (MagicDNS off?). Try the raw Tailscale IP. Confirm the opencode server is running, the device is on the same tailnet, and the port is correct.",
-      "tailscaleDown": "The embedded Tailscale node is not connected. Open Settings → Tailscale, check the Control URL and Auth Key, and start it before connecting.",
-      "tailscaleError": "The embedded Tailscale node failed: {{error}}. Check the Control URL and Auth Key in Settings → Tailscale."
+      "tailscaleDown": "The embedded Tailscale node is not connected. Open Settings → Tailscale, check your Auth Key, and start it before connecting.",
+      "tailscaleError": "The embedded Tailscale node failed: {{error}}. Check your Auth Key in Settings → Tailscale."
     }
   },
   "nav": {
@@ -310,6 +314,7 @@
     "activeBadge": "Active",
     "tailscaleDown": "Tailscale disconnected",
     "tailscaleReconnect": "Reconnect",
+    "tailscaleConnecting": "Connecting via Tailscale…",
     "lastConnected": "Last connected: {{date}}",
     "actionsAlert": {
       "message": "What would you like to do?",

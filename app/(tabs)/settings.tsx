@@ -130,7 +130,7 @@ export default function SettingsScreen() {
     ])
   }, [t, setLocale, localeLabels])
 
-  const tsConfigured = tailscale.controlUrl.trim() !== "" && tailscale.authKey.trim() !== ""
+  const tsConfigured = tailscale.authKey.trim() !== ""
   const tsSubtitle = !tailscaleNative()
     ? t("settings.tailscale.unavailable")
     : !tsConfigured

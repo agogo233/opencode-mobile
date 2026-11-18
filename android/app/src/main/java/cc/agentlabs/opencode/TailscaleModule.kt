@@ -19,6 +19,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 class TailscalePackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext) =
@@ -48,15 +49,34 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         unregisterNetworkWatcher()
         executor.execute {
             forwarder.close()
-            startedControlUrl = null
-            startedAuthKey = null
-            startedHostname = null
+            clearStartedIdentity()
+        }
+        // Graceful shutdown: the queued close task above still runs, but no
+        // further work can be submitted after the catalyst instance is gone.
+        executor.shutdown()
+    }
+
+    private fun clearStartedIdentity() {
+        startedControlUrl = null
+        startedAuthKey = null
+        startedHostname = null
+    }
+
+    // Runs a task on the bridge executor. After the catalyst instance is
+    // destroyed the executor is shut down; a late RN-bridge dispatch would
+    // otherwise throw RejectedExecutionException at the call site and leave
+    // the JS promise pending forever, so reject it explicitly instead.
+    private fun dispatch(promise: Promise, task: () -> Unit) {
+        try {
+            executor.execute(task)
+        } catch (_: RejectedExecutionException) {
+            promise.reject("TS_SHUTDOWN", "Tailscale module destroyed", null)
         }
     }
 
     @ReactMethod
     fun start(controlUrl: String, authKey: String, hostname: String, promise: Promise) {
-        executor.execute {
+        dispatch(promise) {
             try {
                 // Interface info must be supplied before tsnet boots: Android
                 // denies Go's netlink interface enumeration on API 30+.
@@ -86,9 +106,12 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun stop(promise: Promise) {
-        executor.execute {
+        dispatch(promise) {
             try {
                 forwarder.close()
+                // Don't keep the identity (incl. the auth key) in memory once
+                // the user explicitly stopped the node.
+                clearStartedIdentity()
                 promise.resolve(statusMap())
             } catch (e: Exception) {
                 promise.reject("TS_STOP", e.message, e)
@@ -98,7 +121,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun status(promise: Promise) {
-        executor.execute {
+        dispatch(promise) {
             try {
                 promise.resolve(statusMap())
             } catch (e: Exception) {
@@ -111,7 +134,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     // { id, port } — the app then talks to http://127.0.0.1:<port>.
     @ReactMethod
     fun forward(targetUrl: String, promise: Promise) {
-        executor.execute {
+        dispatch(promise) {
             try {
                 val id = forwarder.startForwardAuto(targetUrl, 0)
                 val map = WritableNativeMap()
@@ -127,7 +150,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun stopForward(id: String, promise: Promise) {
-        executor.execute {
+        dispatch(promise) {
             try {
                 forwarder.stopForward(id)
                 promise.resolve(null)

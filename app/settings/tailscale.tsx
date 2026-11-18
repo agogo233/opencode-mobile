@@ -60,7 +60,9 @@ export default function TailscaleSettingsScreen() {
     return () => clearInterval(id)
   }, [])
 
-  const configured = controlUrlInput.trim() !== "" && authKeyInput.trim() !== ""
+  // The control URL is optional: an empty value targets the official
+  // Tailscale coordination server. Only the auth key is required.
+  const configured = authKeyInput.trim() !== ""
   const connected = phase === "connected"
   const dotColor = PHASE_COLORS[phase] ?? (isDark ? "#666666" : "#999999")
 

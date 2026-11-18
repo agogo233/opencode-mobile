@@ -66,7 +66,7 @@ export default function AddConnectionScreen() {
     return `${scheme}://${host}:${finalPort}`
   }
 
-  const tailscaleConfigured = tailscale.controlUrl.trim() !== "" && tailscale.authKey.trim() !== ""
+  const tailscaleConfigured = tailscale.authKey.trim() !== ""
 
   const warnTailscaleConfig = () => {
     Alert.alert(
@@ -474,7 +474,9 @@ export default function AddConnectionScreen() {
             ? "http://192.168.1.100:4096"
             : type === "tunnel"
               ? "https://your-tunnel.trycloudflare.com"
-              : "https://api.opencode.ai"
+              : type === "tailscale"
+                ? "http://100.101.10.5:4096"
+                : "https://api.opencode.ai"
         }
         placeholderTextColor={isDark ? "#666666" : "#999999"}
         value={url}

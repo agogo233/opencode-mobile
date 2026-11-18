@@ -85,7 +85,7 @@ export default function EditConnectionScreen() {
     }
     if (type === "tailscale") {
       const tsState = useTailscale.getState()
-      if (tsState.controlUrl.trim() === "" || tsState.authKey.trim() === "") {
+      if (tsState.authKey.trim() === "") {
         Alert.alert(
           t("connection.shared.alerts.tailscaleConfigTitle"),
           t("connection.shared.alerts.tailscaleConfigMessage"),
