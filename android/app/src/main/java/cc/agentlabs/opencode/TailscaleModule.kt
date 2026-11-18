@@ -88,7 +88,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
                     startedHostname == hostname
                 ) {
                     promise.resolve(statusMap())
-                    return@execute
+                    return@dispatch
                 }
                 forwarder.close() // idempotent reset so a new config always applies
                 val stateDir = File(reactContext.filesDir, "tailscale").absolutePath
