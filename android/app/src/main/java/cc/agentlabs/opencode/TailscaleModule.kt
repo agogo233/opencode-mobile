@@ -6,11 +6,11 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
+import com.facebook.react.ReactPackage
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReactPackage
 import com.facebook.react.bridge.WritableNativeMap
 import com.facebook.react.uimanager.ViewManager
 import mobiletsnet.Forwarder
@@ -62,8 +62,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
                 // denies Go's netlink interface enumeration on API 30+.
                 injectNetworkInterfaces()
                 registerNetworkWatcher()
-                val state = forwarder.status()
-                if (state.phase == "connected" &&
+                if (forwarder.getPhase() == "connected" &&
                     startedControlUrl == controlUrl &&
                     startedAuthKey == authKey &&
                     startedHostname == hostname
@@ -117,7 +116,8 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
                 val id = forwarder.startForwardAuto(targetUrl, 0)
                 val map = WritableNativeMap()
                 map.putString("id", id)
-                map.putInt("port", forwarder.getForwardLocalPort(id))
+                // gomobile maps Go int to Java long; JS wants a Number port.
+                map.putInt("port", forwarder.getForwardLocalPort(id).toInt())
                 promise.resolve(map)
             } catch (e: Exception) {
                 promise.reject("TS_FORWARD", e.message, e)
@@ -138,12 +138,13 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     }
 
     private fun statusMap(): WritableNativeMap {
-        val state = forwarder.status()
+        // Use the primitive getters: gomobile struct-returning methods are not
+        // usable from Kotlin here, and these map 1:1 onto the State fields.
         val map = WritableNativeMap()
-        map.putString("phase", state.phase)
-        map.putString("hostname", state.hostname)
-        map.putString("error", state.lastError)
-        map.putInt("forwardCount", state.forwardCount)
+        map.putString("phase", forwarder.getPhase())
+        map.putString("hostname", forwarder.getHostname())
+        map.putString("error", forwarder.getLastError())
+        map.putInt("forwardCount", forwarder.getForwardCount().toInt())
         val addresses = WritableNativeMap()
         addresses.putString("ipv4", forwarder.getTailscaleIPv4())
         addresses.putString("ipv6", forwarder.getTailscaleIPv6())
