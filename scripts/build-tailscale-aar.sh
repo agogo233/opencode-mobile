@@ -28,11 +28,16 @@ GOBIN_DIR="$("$GO_BIN" env GOPATH)/bin"
 export PATH="$GOBIN_DIR:$PATH"
 
 mkdir -p android/app/libs
-gomobile bind \
-  -target=android/arm64 \
-  -androidapi 26 \
-  -ldflags "-s -w" \
-  -o android/app/libs/mobiletsnet.aar \
-  ./native/tailscale-go
+# gomobile bind resolves the package against the current module, so run it
+# from inside native/tailscale-go (the only go.mod in this repo).
+(
+  cd native/tailscale-go
+  gomobile bind \
+    -target=android/arm64 \
+    -androidapi 26 \
+    -ldflags "-s -w" \
+    -o ../../android/app/libs/mobiletsnet.aar \
+    .
+)
 
 echo "Built android/app/libs/mobiletsnet.aar"
