@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next"
 import * as Clipboard from "expo-clipboard"
 import { useTailscale } from "../../src/stores/tailscale"
 import { tailscaleNative } from "../../src/lib/tailscale"
+import { isInsecureControlUrl } from "../../src/lib/control-url"
 
 const PHASE_COLORS: Record<string, string> = {
   connected: "#22c55e",
@@ -66,6 +67,18 @@ export default function TailscaleSettingsScreen() {
   const connected = phase === "connected"
   const dotColor = PHASE_COLORS[phase] ?? (isDark ? "#666666" : "#999999")
 
+  const confirmInsecureControl = () =>
+    new Promise<boolean>((resolve) => {
+      Alert.alert(
+        t("settings.tailscale.page.insecureControlTitle"),
+        t("settings.tailscale.page.insecureControlMessage"),
+        [
+          { text: t("common.cancel"), style: "cancel", onPress: () => resolve(false) },
+          { text: t("common.ok"), onPress: () => resolve(true) },
+        ],
+      )
+    })
+
   const handleToggle = async () => {
     if (connected) {
       await stop()
@@ -75,6 +88,7 @@ export default function TailscaleSettingsScreen() {
       Alert.alert(t("settings.tailscale.page.notConfiguredTitle"), t("settings.tailscale.page.notConfigured"))
       return
     }
+    if (isInsecureControlUrl(controlUrlInput) && !(await confirmInsecureControl())) return
     await saveConfig({ controlUrl: controlUrlInput, authKey: authKeyInput, hostname: hostnameInput })
     await start()
   }

@@ -214,7 +214,7 @@ export default function EditConnectionScreen() {
       {/* Connection Type */}
       <Text style={[styles.label, isDark && styles.labelDark]}>{t("connection.shared.connectionType")}</Text>
       <View style={styles.typeContainer}>
-        {CONNECTION_TYPES.map((opt) => (
+        {CONNECTION_TYPES.filter((opt) => Platform.OS === "android" || opt.type !== "tailscale").map((opt) => (
           <TouchableOpacity
             key={opt.type}
             style={[
@@ -303,6 +303,10 @@ export default function EditConnectionScreen() {
         onChangeText={setPassword}
         secureTextEntry
       />
+
+      {type === "tailscale" && (
+        <Text style={[styles.hint, isDark && styles.hintDark]}>{t("connection.shared.tailscaleStartupHint")}</Text>
+      )}
 
       {/* Actions */}
       <View style={styles.actions}>

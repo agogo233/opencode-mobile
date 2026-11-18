@@ -311,22 +311,26 @@ export default function AddConnectionScreen() {
           secureTextEntry
           testID="connect-password-input"
         />
-        {/* Embedded Tailscale */}
-        <View style={styles.tsToggleRow}>
-          <View style={styles.tsToggleTextWrap}>
-            <Text style={[styles.label, isDark && styles.labelDark, { marginTop: 0, marginBottom: 0 }]}>
-              {t("connection.add.quick.viaTailscale")}
-            </Text>
-            <Text style={[styles.hint, isDark && styles.hintDark]}>{t("connection.add.quick.viaTailscaleHint")}</Text>
-          </View>
-          <Switch value={viaTailscale} onValueChange={setViaTailscale} trackColor={{ false: "#767577", true: "#22c55e" }} />
-        </View>
-        {viaTailscale && !tailscaleConfigured && (
-          <TouchableOpacity style={styles.tsGuideBox} onPress={() => router.push("/settings/tailscale")}>
-            <Ionicons name="warning" size={16} color="#f59e0b" />
-            <Text style={styles.tsGuideText}>{t("connection.add.quick.tailscaleSetupHint")}</Text>
-            <Ionicons name="chevron-forward" size={16} color={isDark ? "#888888" : "#666666"} />
-          </TouchableOpacity>
+        {/* Embedded Tailscale (Android only — the native node has no iOS build) */}
+        {Platform.OS === "android" && (
+          <>
+            <View style={styles.tsToggleRow}>
+              <View style={styles.tsToggleTextWrap}>
+                <Text style={[styles.label, isDark && styles.labelDark, { marginTop: 0, marginBottom: 0 }]}>
+                  {t("connection.add.quick.viaTailscale")}
+                </Text>
+                <Text style={[styles.hint, isDark && styles.hintDark]}>{t("connection.add.quick.viaTailscaleHint")}</Text>
+              </View>
+              <Switch value={viaTailscale} onValueChange={setViaTailscale} trackColor={{ false: "#767577", true: "#22c55e" }} />
+            </View>
+            {viaTailscale && !tailscaleConfigured && (
+              <TouchableOpacity style={styles.tsGuideBox} onPress={() => router.push("/settings/tailscale")}>
+                <Ionicons name="warning" size={16} color="#f59e0b" />
+                <Text style={styles.tsGuideText}>{t("connection.add.quick.tailscaleSetupHint")}</Text>
+                <Ionicons name="chevron-forward" size={16} color={isDark ? "#888888" : "#666666"} />
+              </TouchableOpacity>
+            )}
+          </>
         )}
 
         <Text style={[styles.usernameHint, isDark && styles.hintDark]}>
@@ -357,6 +361,10 @@ export default function AddConnectionScreen() {
             </>
           )}
         </TouchableOpacity>
+
+        {viaTailscale && (
+          <Text style={[styles.hint, isDark && styles.hintDark]}>{t("connection.shared.tailscaleStartupHint")}</Text>
+        )}
 
         {/* Help text */}
         <View style={[styles.helpBox, isDark && styles.helpBoxDark]}>
@@ -425,7 +433,7 @@ export default function AddConnectionScreen() {
           { type: "tunnel" as const, label: t("connection.shared.types.tunnel"), icon: "globe" as const },
           { type: "cloud" as const, label: t("connection.shared.types.cloud"), icon: "cloud" as const },
           { type: "tailscale" as const, label: t("connection.shared.types.tailscale"), icon: "shield-checkmark" as const },
-        ].map((opt) => (
+        ].filter((opt) => Platform.OS === "android" || opt.type !== "tailscale").map((opt) => (
           <TouchableOpacity
             key={opt.type}
             style={[
@@ -546,6 +554,10 @@ export default function AddConnectionScreen() {
           </Text>
         )}
       </TouchableOpacity>
+
+      {type === "tailscale" && (
+        <Text style={[styles.hint, isDark && styles.hintDark]}>{t("connection.shared.tailscaleStartupHint")}</Text>
+      )}
     </ScrollView>
     </KeyboardAvoidingView>
   )
