@@ -5,8 +5,10 @@
 # (installed by this script), a JDK with javac on PATH, and the Android SDK
 # with NDK 27.2.12479018 (ANDROID_NDK_HOME / ANDROID_NDK_ROOT).
 #
-# Output: android/app/libs/mobiletsnet.aar (arm64-v8a, API 26+). The AAR is a
-# build artifact — never commit it; CI builds and caches it automatically.
+# Output: android/app/libs/mobiletsnet.aar (arm64-v8a + x86_64, API 26+).
+# x86_64 is required so the CI emulator (x86_64) can install the APK; the
+# release builds filter packaging to arm64-v8a anyway. The AAR is a build
+# artifact — never commit it; CI builds and caches it automatically.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -33,7 +35,7 @@ mkdir -p android/app/libs
 (
   cd native/tailscale-go
   gomobile bind \
-    -target=android/arm64 \
+    -target=android/arm64,android/x86_64 \
     -androidapi 26 \
     -ldflags "-s -w" \
     -o ../../android/app/libs/mobiletsnet.aar \
