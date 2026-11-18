@@ -130,7 +130,16 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.findByName('release') ?: signingConfigs.debug
+            def releaseSigning = signingConfigs.findByName('release')
+            if (releaseSigning != null) {
+                signingConfig releaseSigning
+            } else {
+                // Deliberate fallback (CI builds without signing secrets use it),
+                // but it must never be silent: debug-signed artifacts cannot be
+                // published as updates to the Play/F-Droid tracks.
+                logger.warn("RELEASE BUILD IS USING THE DEBUG KEYSTORE — set RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS and RELEASE_KEY_PASSWORD for a production-signed build.")
+                signingConfig signingConfigs.debug
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -182,7 +191,11 @@ dependencies {
 
     // Embedded Tailscale forwarder (built by scripts/build-tailscale-aar.sh;
     // CI builds it before Gradle runs — the AAR is not committed).
-    implementation(files("libs/mobiletsnet.aar"))
+    def tsnetAar = file("libs/mobiletsnet.aar")
+    if (!tsnetAar.exists()) {
+        throw new GradleException("android/app/libs/mobiletsnet.aar is missing. Build it first: bash scripts/build-tailscale-aar.sh (CI builds it automatically before Gradle runs).")
+    }
+    implementation(files(tsnetAar))
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
