@@ -16,9 +16,52 @@
   "settings": {
     "sections": {
       "security": "安全",
+      "tailscale": "Tailscale",
       "notifications": "通知",
       "privacy": "隐私",
       "about": "关于"
+    },
+    "tailscale": {
+      "label": "Tailscale",
+      "subtitleIdle": "未配置 — 通过你的 tailnet 连接",
+      "subtitleConnecting": "连接中…",
+      "subtitleRunning": "已连接 · {{ip}}",
+      "subtitleError": "出错 — 点按修复",
+      "subtitleOff": "已断开",
+      "unavailable": "当前平台不可用",
+      "openSettings": "打开 Tailscale 设置",
+      "page": {
+        "title": "Tailscale",
+        "statusTitle": "状态",
+        "phase": {
+          "new": "未配置",
+          "configured": "可以启动",
+          "connecting": "连接中…",
+          "connected": "已连接",
+          "error": "错误",
+          "closed": "已停止"
+        },
+        "unavailable": "当前构建未包含内嵌 Tailscale 节点。",
+        "localAddress": "Tailscale IP",
+        "copy": "复制",
+        "copied": "已复制！",
+        "deviceName": "节点名",
+        "identityTitle": "身份",
+        "controlUrl": "控制服务器地址",
+        "controlUrlHint": "你的 Headscale（或 Tailscale）控制服务器，例如 https://headscale.example.com",
+        "authKey": "Auth Key",
+        "authKeyHint": "首次连接必需；保存在 Android Keystore 中",
+        "hostnameLabel": "tailnet 中的节点名",
+        "hostnameHint": "留空则自动生成",
+        "start": "启动",
+        "stop": "停止",
+        "retry": "重试",
+        "starting": "启动中…",
+        "stopping": "停止中…",
+        "notConfiguredTitle": "Tailscale 尚未配置",
+        "notConfigured": "请先填写控制服务器地址和 Auth Key。",
+        "help": "首次连接需要来自 Tailscale 或 Headscale 管理员的 Auth Key。节点身份会保存在本机，之后启动会自动重连。到 opencode 服务器的流量经由你的 tailnet 端到端加密。"
+      }
     },
     "security": {
       "biometricOpen": {
@@ -163,7 +206,8 @@
       "types": {
         "local": "本地",
         "tunnel": "隧道",
-        "cloud": "云端"
+        "cloud": "云端",
+        "tailscale": "Tailscale"
       },
       "name": "名称",
       "namePlaceholder": "我的服务器",
@@ -180,7 +224,9 @@
         "connectionFailedTitle": "连接失败",
         "unknownError": "未知错误",
         "saveFailedTitle": "无法保存连接",
-        "saveFailedMessage": "连接测试成功，但保存失败，请重试。"
+        "saveFailedMessage": "连接测试成功，但保存失败，请重试。",
+        "tailscaleConfigTitle": "Tailscale 尚未配置",
+        "tailscaleConfigMessage": "请先在 设置 → Tailscale 中填写控制服务器地址和 Auth Key。"
       }
     },
     "add": {
@@ -192,6 +238,9 @@
         "namePlaceholder": "我的 Mac",
         "passwordIfSetLabel": "密码（如服务器已设置）",
         "passwordPlaceholder": "留空表示无密码",
+        "viaTailscale": "通过内嵌 Tailscale 连接",
+        "viaTailscaleHint": "流量经由 App 内嵌的加密 tailnet 节点 — 无需单独安装 Tailscale App",
+        "tailscaleSetupHint": "请先完成 Tailscale 配置：填写控制服务器地址和 Auth Key。",
         "usernameHintPrefix": "用户名默认为 ",
         "usernameHintMiddle": "。需要自定义用户名？请使用",
         "usernameHintSuffix": "。",
@@ -245,7 +294,9 @@
       "noInternet": "设备完全没有可用的网络（公共检查也失败了）。请检查 Wi-Fi/移动数据及 Tailscale（VPN）状态。",
       "timeout": "连接服务器超时（连接被丢弃而非拒绝）。可能是防火墙、端口错误，或 Tailscale ACL 拦截了设备。",
       "serverUnreachable": "网络正常，但无法连接到服务器 {{host}}:{{port}}。请确认 opencode 服务器已启动、设备在同一 tailnet、端口正确。",
-      "serverUnreachableDns": "网络正常，但无法连接到服务器 {{host}}:{{port}}。主机名可能无法解析（MagicDNS 未开启？），请尝试使用 Tailscale 原始 IP。请确认 opencode 服务器已启动、设备在同一 tailnet、端口正确。"
+      "serverUnreachableDns": "网络正常，但无法连接到服务器 {{host}}:{{port}}。主机名可能无法解析（MagicDNS 未开启？），请尝试使用 Tailscale 原始 IP。请确认 opencode 服务器已启动、设备在同一 tailnet、端口正确。",
+      "tailscaleDown": "内嵌 Tailscale 节点未连接。请打开 设置 → Tailscale，检查控制服务器地址和 Auth Key 并启动后再连接。",
+      "tailscaleError": "内嵌 Tailscale 节点出错：{{error}}。请在 设置 → Tailscale 中检查控制服务器地址和 Auth Key。"
     }
   },
   "nav": {
@@ -257,6 +308,8 @@
   },
   "connectionsList": {
     "activeBadge": "当前使用",
+    "tailscaleDown": "Tailscale 已断开",
+    "tailscaleReconnect": "重连",
     "lastConnected": "上次连接：{{date}}",
     "actionsAlert": {
       "message": "您想执行什么操作？",

@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useConnections } from "../../src/stores/connections"
 import { useSettings } from "../../src/stores/settings"
+import { useTailscale } from "../../src/stores/tailscale"
 import type { ServerConnection } from "../../src/lib/types"
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200] as const
@@ -24,7 +25,14 @@ function ConnectionItem({
   onDelete: () => void
 }) {
   const { t } = useTranslation()
-  const typeIcon = connection.type === "local" ? "wifi" : connection.type === "tunnel" ? "globe" : "cloud"
+  const typeIcon =
+    connection.type === "local"
+      ? "wifi"
+      : connection.type === "tunnel"
+        ? "globe"
+        : connection.type === "tailscale"
+          ? "shield-checkmark"
+          : "cloud"
 
   const handleLongPress = () => {
     Alert.alert(connection.name, t("connectionsList.actionsAlert.message"), [
@@ -87,6 +95,25 @@ function ConnectionItem({
   )
 }
 
+// Shown while the active connection rides the embedded Tailscale node but the
+// node is not connected (process killed in background, auth expired, ...).
+function TailscaleBanner({ isDark }: { isDark: boolean }) {
+  const { t } = useTranslation()
+  const { phase, busy, start } = useTailscale()
+  const { activeConnection } = useConnections()
+  if (activeConnection?.type !== "tailscale") return null
+  if (phase === "connected" || phase === "connecting") return null
+  return (
+    <View style={[styles.tsBanner, isDark && styles.tsBannerDark]}>
+      <Ionicons name="warning" size={16} color="#f59e0b" />
+      <Text style={[styles.tsBannerText, isDark && styles.textDark]}>{t("connectionsList.tailscaleDown")}</Text>
+      <TouchableOpacity onPress={() => start()} disabled={busy}>
+        <Text style={styles.tsBannerAction}>{t("connectionsList.tailscaleReconnect")}</Text>
+      </TouchableOpacity>
+    </View>
+  )
+}
+
 export default function ConnectionsScreen() {
   const colorScheme = useColorScheme()
   const isDark = colorScheme === "dark"
@@ -112,6 +139,7 @@ export default function ConnectionsScreen() {
 
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
+      <TailscaleBanner isDark={isDark} />
       <FlatList
         data={connections}
         keyExtractor={(item) => item.id}
@@ -199,6 +227,30 @@ const styles = StyleSheet.create({
   },
   containerDark: {
     backgroundColor: "#0a0a0a",
+  },
+  tsBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: "#fffbeb",
+    borderBottomWidth: 1,
+    borderBottomColor: "#fde68a",
+  },
+  tsBannerDark: {
+    backgroundColor: "#2a2110",
+    borderBottomColor: "#4a3b15",
+  },
+  tsBannerText: {
+    fontSize: 13,
+    color: "#92400e",
+    flex: 1,
+  },
+  tsBannerAction: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#b45309",
   },
   header: {
     padding: 16,

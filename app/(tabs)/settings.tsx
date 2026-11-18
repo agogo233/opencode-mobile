@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   View,
   Text,
@@ -12,8 +12,11 @@ import {
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
+import { router } from "expo-router"
 import { useAuth } from "../../src/stores/auth"
 import { useSettings } from "../../src/stores/settings"
+import { useTailscale } from "../../src/stores/tailscale"
+import { tailscaleNative } from "../../src/lib/tailscale"
 import {
   categories,
   categoryMeta,
@@ -80,7 +83,14 @@ export default function SettingsScreen() {
 
   const { settings, hasBiometrics, updateSettings, lock } = useAuth()
   const { notifications, setNotification, locale, setLocale } = useSettings()
+  const tailscale = useTailscale()
   const [osGranted, setOsGranted] = useState<boolean | null>(null)
+
+  // One status refresh so the Tailscale subtitle is current; the store also
+  // updates itself whenever the app uses a tailscale connection.
+  useEffect(() => {
+    tailscale.refresh()
+  }, [])
 
   // Check OS permission state on first toggle attempt
   const handleToggle = useCallback(
@@ -119,6 +129,41 @@ export default function SettingsScreen() {
       { text: t("common.cancel"), style: "cancel" },
     ])
   }, [t, setLocale, localeLabels])
+
+  const tsConfigured = tailscale.controlUrl.trim() !== "" && tailscale.authKey.trim() !== ""
+  const tsSubtitle = !tailscaleNative()
+    ? t("settings.tailscale.unavailable")
+    : !tsConfigured
+      ? t("settings.tailscale.subtitleIdle")
+      : tailscale.phase === "connected"
+        ? t("settings.tailscale.subtitleRunning", { ip: tailscale.ipv4 || tailscale.ipv6 || "—" })
+        : tailscale.phase === "connecting"
+          ? t("settings.tailscale.subtitleConnecting")
+          : tailscale.phase === "error"
+            ? t("settings.tailscale.subtitleError")
+            : t("settings.tailscale.subtitleOff")
+
+  const handleTailscaleToggle = useCallback(
+    (enabled: boolean) => {
+      if (!enabled) {
+        tailscale.stop()
+        return
+      }
+      if (!tsConfigured) {
+        Alert.alert(
+          t("connection.shared.alerts.tailscaleConfigTitle"),
+          t("connection.shared.alerts.tailscaleConfigMessage"),
+          [
+            { text: t("common.cancel"), style: "cancel" },
+            { text: t("settings.tailscale.openSettings"), onPress: () => router.push("/settings/tailscale") },
+          ],
+        )
+        return
+      }
+      tailscale.start()
+    },
+    [tailscale, tsConfigured, t],
+  )
 
   return (
     <ScrollView style={[styles.container, isDark && styles.containerDark]} contentContainerStyle={styles.content}>
@@ -165,6 +210,27 @@ export default function SettingsScreen() {
             right={<Ionicons name="chevron-forward" size={20} color={isDark ? "#666666" : "#999999"} />}
           />
         )}
+      </SettingSection>
+
+      <SettingSection title={t("settings.sections.tailscale")} isDark={isDark}>
+        <SettingRow
+          icon="shield-checkmark"
+          label={t("settings.tailscale.label")}
+          description={tsSubtitle}
+          isDark={isDark}
+          onPress={() => router.push("/settings/tailscale")}
+          right={
+            <View style={styles.rowControls}>
+              <Switch
+                value={tailscale.phase === "connected" || tailscale.phase === "connecting"}
+                onValueChange={handleTailscaleToggle}
+                disabled={!tailscaleNative()}
+                trackColor={{ false: "#767577", true: "#22c55e" }}
+              />
+              <Ionicons name="chevron-forward" size={20} color={isDark ? "#666666" : "#999999"} />
+            </View>
+          }
+        />
       </SettingSection>
 
       <SettingSection title={t("settings.sections.notifications")} isDark={isDark}>
@@ -310,6 +376,11 @@ const styles = StyleSheet.create({
   },
   settingContent: {
     flex: 1,
+  },
+  rowControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   settingLabel: {
     fontSize: 16,

@@ -10,12 +10,14 @@ import {
   useColorScheme,
   ActivityIndicator,
   Alert,
+  Switch,
 } from "react-native"
 import { KeyboardAvoidingView } from "react-native-keyboard-controller"
 import { router } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useConnections } from "../../src/stores/connections"
+import { useTailscale } from "../../src/stores/tailscale"
 import type { ConnectionType } from "../../src/lib/types"
 import { probeConnection, shareReport, translatedFailureSummary } from "../../src/lib/diagnostics"
 import { parseUrl } from "../../src/lib/diagnostics-classify"
@@ -27,9 +29,11 @@ export default function AddConnectionScreen() {
   const { t } = useTranslation()
 
   const { addConnection, testConnection } = useConnections()
+  const tailscale = useTailscale()
 
   const [mode, setMode] = useState<"quick" | "advanced">("quick")
   const [type, setType] = useState<ConnectionType>("local")
+  const [viaTailscale, setViaTailscale] = useState(false)
   const [name, setName] = useState("")
   const [ip, setIp] = useState("")
   const [port, setPort] = useState("4096")
@@ -62,10 +66,28 @@ export default function AddConnectionScreen() {
     return `${scheme}://${host}:${finalPort}`
   }
 
+  const tailscaleConfigured = tailscale.controlUrl.trim() !== "" && tailscale.authKey.trim() !== ""
+
+  const warnTailscaleConfig = () => {
+    Alert.alert(
+      t("connection.shared.alerts.tailscaleConfigTitle"),
+      t("connection.shared.alerts.tailscaleConfigMessage"),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        { text: t("settings.tailscale.openSettings"), onPress: () => router.push("/settings/tailscale") },
+      ],
+    )
+  }
+
   const handleQuickConnect = async () => {
     const serverUrl = buildUrl()
     if (!serverUrl) {
       Alert.alert(t("common.error"), t("connection.add.alerts.enterIp"))
+      return
+    }
+    const connType: ConnectionType = viaTailscale ? "tailscale" : "local"
+    if (connType === "tailscale" && !tailscaleConfigured) {
+      warnTailscaleConfig()
       return
     }
 
@@ -80,7 +102,7 @@ export default function AddConnectionScreen() {
       {
         id: "",
         name: name || t("connection.shared.namePlaceholder"),
-        type: "local",
+        type: connType,
         url: serverUrl,
       },
       password || undefined,
@@ -92,7 +114,7 @@ export default function AddConnectionScreen() {
         await addConnection(
           {
             name: name.trim() || t("connection.shared.namePlaceholder"),
-            type: "local",
+            type: connType,
             url: serverUrl,
             // Carry the transport the pre-flight probe already determined, so the
             // save does not probe the same server a second time.
@@ -111,8 +133,16 @@ export default function AddConnectionScreen() {
         )
       }
     } else {
-      // Failed: run active diagnostics and offer a shareable report.
-      const report = await probeConnection(serverUrl, buildAuth(undefined, password))
+      // Failed: run active diagnostics and offer a shareable report. For
+      // tailscale connections the probes ran against the loopback forward, so
+      // probe there and let the classifier know the node's state.
+      const tsState = useTailscale.getState()
+      const report = await probeConnection(result.probeUrl ?? serverUrl, buildAuth(undefined, password), {
+        tailscale:
+          connType === "tailscale"
+            ? { connected: tsState.phase === "connected", error: tsState.error }
+            : undefined,
+      })
       setIsConnecting(false)
       Alert.alert(
         t("connection.shared.alerts.connectionFailedTitle"),
@@ -140,6 +170,10 @@ export default function AddConnectionScreen() {
     }
     if (!parseUrl(url).valid) {
       Alert.alert(t("connection.shared.alerts.invalidUrlTitle"), t("connection.shared.alerts.invalidUrlMessage"))
+      return
+    }
+    if (type === "tailscale" && !tailscaleConfigured) {
+      warnTailscaleConfig()
       return
     }
 
@@ -190,7 +224,11 @@ export default function AddConnectionScreen() {
     // Failed: same "Connection Failed" alert as Quick Connect — run active
     // diagnostics and offer a shareable report instead of silently persisting
     // an unreachable/unauthorized connection.
-    const report = await probeConnection(url.trim(), buildAuth(username, password))
+    const tsState = useTailscale.getState()
+    const report = await probeConnection(result.probeUrl ?? url.trim(), buildAuth(username, password), {
+      tailscale:
+        type === "tailscale" ? { connected: tsState.phase === "connected", error: tsState.error } : undefined,
+    })
     setIsConnecting(false)
     Alert.alert(
       t("connection.shared.alerts.connectionFailedTitle"),
@@ -273,6 +311,24 @@ export default function AddConnectionScreen() {
           secureTextEntry
           testID="connect-password-input"
         />
+        {/* Embedded Tailscale */}
+        <View style={styles.tsToggleRow}>
+          <View style={styles.tsToggleTextWrap}>
+            <Text style={[styles.label, isDark && styles.labelDark, { marginTop: 0, marginBottom: 0 }]}>
+              {t("connection.add.quick.viaTailscale")}
+            </Text>
+            <Text style={[styles.hint, isDark && styles.hintDark]}>{t("connection.add.quick.viaTailscaleHint")}</Text>
+          </View>
+          <Switch value={viaTailscale} onValueChange={setViaTailscale} trackColor={{ false: "#767577", true: "#22c55e" }} />
+        </View>
+        {viaTailscale && !tailscaleConfigured && (
+          <TouchableOpacity style={styles.tsGuideBox} onPress={() => router.push("/settings/tailscale")}>
+            <Ionicons name="warning" size={16} color="#f59e0b" />
+            <Text style={styles.tsGuideText}>{t("connection.add.quick.tailscaleSetupHint")}</Text>
+            <Ionicons name="chevron-forward" size={16} color={isDark ? "#888888" : "#666666"} />
+          </TouchableOpacity>
+        )}
+
         <Text style={[styles.usernameHint, isDark && styles.hintDark]}>
           {t("connection.add.quick.usernameHintPrefix")}
           <Text style={styles.code}>opencode</Text>
@@ -368,6 +424,7 @@ export default function AddConnectionScreen() {
           { type: "local" as const, label: t("connection.shared.types.local"), icon: "wifi" as const },
           { type: "tunnel" as const, label: t("connection.shared.types.tunnel"), icon: "globe" as const },
           { type: "cloud" as const, label: t("connection.shared.types.cloud"), icon: "cloud" as const },
+          { type: "tailscale" as const, label: t("connection.shared.types.tailscale"), icon: "shield-checkmark" as const },
         ].map((opt) => (
           <TouchableOpacity
             key={opt.type}
@@ -594,6 +651,32 @@ const styles = StyleSheet.create({
   usernameHintLink: {
     color: "#6366f1",
     fontWeight: "600",
+  },
+  tsToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginTop: 16,
+  },
+  tsToggleTextWrap: {
+    flex: 1,
+  },
+  tsGuideBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#fffbeb",
+    borderWidth: 1,
+    borderColor: "#fde68a",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  tsGuideText: {
+    fontSize: 13,
+    color: "#92400e",
+    flex: 1,
   },
   advancedLink: {
     flexDirection: "row",

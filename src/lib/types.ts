@@ -1,7 +1,9 @@
 import type { ServerApi } from "./api-detect"
 
-// Connection types for multiple server support
-export type ConnectionType = "local" | "tunnel" | "cloud"
+// Connection types for multiple server support. "tailscale" routes traffic
+// through the embedded tsnet forwarder (loopback proxy → tailnet), so no
+// system VPN or separate Tailscale app is needed.
+export type ConnectionType = "local" | "tunnel" | "cloud" | "tailscale"
 
 export interface ServerConnection {
   id: string

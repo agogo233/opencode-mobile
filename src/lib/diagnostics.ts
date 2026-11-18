@@ -24,6 +24,7 @@ export interface DiagnosticReport {
   port?: string
   isHostname: boolean
   attempts: ProbeAttempt[]
+  tailscaleError?: string
   device: {
     platform: string
     osVersion: string
@@ -63,7 +64,11 @@ async function timedFetch(name: string, target: string, init?: RequestInit, opts
   }
 }
 
-export async function probeConnection(url: string, auth?: { username: string; password: string }): Promise<DiagnosticReport> {
+export async function probeConnection(
+  url: string,
+  auth?: { username: string; password: string },
+  opts?: { tailscale?: { connected: boolean; error?: string } },
+): Promise<DiagnosticReport> {
   const parsed = parseUrl(url)
   log.info("diag", "probe start", url, "parsed", JSON.stringify(parsed))
 
@@ -88,7 +93,7 @@ export async function probeConnection(url: string, auth?: { username: string; pa
     internet = await timedFetch("internet", INTERNET_CHECK_URL)
   }
 
-  const { classification, summary } = classify(parsed, health, internet, root)
+  const { classification, summary } = classify(parsed, health, internet, root, opts?.tailscale)
 
   const report: DiagnosticReport = {
     classification,
@@ -99,6 +104,7 @@ export async function probeConnection(url: string, auth?: { username: string; pa
     port: parsed.port,
     isHostname: parsed.isHostname,
     attempts: [health, root, internet],
+    tailscaleError: opts?.tailscale?.error || undefined,
     device: {
       platform: Platform.OS,
       osVersion: String(Platform.Version),
@@ -123,6 +129,8 @@ const FAILURE_SUFFIX: Record<Classification, string> = {
   "health-failed": "healthFailed",
   "tls-error": "tlsError",
   "timeout": "timeout",
+  "tailscale-down": "tailscaleDown",
+  "tailscale-error": "tailscaleError",
   "unknown": "unknown",
 }
 
@@ -136,6 +144,7 @@ export function translatedFailureSummary(report: DiagnosticReport): string {
     status: health?.status ?? "error",
     host: report.host,
     port: report.port,
+    error: report.tailscaleError ?? report.summary,
     defaultValue: report.summary,
   })
 }

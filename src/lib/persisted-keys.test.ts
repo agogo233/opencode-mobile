@@ -32,6 +32,9 @@ const ALLOWED_PERSISTED_KEYS = new Map<string, string>([
   ["AUTH_SETTINGS_KEY", "biometric/app-lock preference"],
   ["COUNT_KEY", "store-review: launch counter"],
   ["ASKED_KEY", "store-review: already-prompted flag"],
+  ["TAILSCALE_STORAGE_KEYS.controlUrl", "user-entered tailnet control server URL (official or Headscale)"],
+  ["TAILSCALE_STORAGE_KEYS.authKey", "user-entered tailnet auth key (SecureStore-encrypted at rest)"],
+  ["TAILSCALE_STORAGE_KEYS.hostname", "user-configured tailnet node hostname"],
 ])
 
 const SRC = path.join(import.meta.dirname, "..")

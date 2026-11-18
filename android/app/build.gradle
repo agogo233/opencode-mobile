@@ -90,10 +90,12 @@ android {
     namespace 'cc.agentlabs.opencode'
     defaultConfig {
         applicationId 'cc.agentlabs.opencode'
-        minSdkVersion rootProject.ext.minSdkVersion
+        // 26 overrides rootProject.ext.minSdkVersion: the embedded tsnet AAR
+        // (gomobile -androidapi 26) requires API 26+.
+        minSdkVersion 26
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 43
-        versionName "0.4.16"
+        versionCode 44
+        versionName "0.5.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -177,6 +179,10 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+
+    // Embedded Tailscale forwarder (built by scripts/build-tailscale-aar.sh;
+    // CI builds it before Gradle runs — the AAR is not committed).
+    implementation(files("libs/mobiletsnet.aar"))
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

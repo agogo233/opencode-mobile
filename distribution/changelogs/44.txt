@@ -1,0 +1,2 @@
+v0.5.0
+Built-in Tailscale: connect to your opencode server over a tailnet without installing the Tailscale app. Add a "Tailscale" connection (works with self-hosted Headscale: control server URL + auth key in Settings → Tailscale). Requires Android 8.0+.

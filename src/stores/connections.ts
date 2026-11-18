@@ -6,6 +6,7 @@ import { createClient, probeServer, type Client, type Project } from "../lib/sdk
 import type { ServerApi } from "../lib/api-detect"
 import { buildAuth } from "../lib/auth"
 import { stripTrailingSlash } from "../lib/path-utils"
+import { useTailscale } from "./tailscale"
 
 const CONNECTIONS_KEY = "opencode_connections"
 const PASSWORDS_PREFIX = "opencode_password_"
@@ -41,7 +42,7 @@ interface ConnectionsState {
   addConnection: (connection: Omit<ServerConnection, "id">, password?: string) => Promise<void>
   removeConnection: (id: string) => Promise<void>
   setActiveConnection: (id: string) => Promise<void>
-testConnection: (connection: ServerConnection, password?: string) => Promise<{ ok: boolean; api?: ServerApi; serverVersion?: string; error?: string }>
+testConnection: (connection: ServerConnection, password?: string) => Promise<{ ok: boolean; api?: ServerApi; serverVersion?: string; error?: string; probeUrl?: string }>
   updateConnection: (id: string, updates: Partial<ServerConnection>, password?: string) => Promise<void>
   refreshProject: () => Promise<void>
   // Create a one-off client pointing at a specific directory (for cross-project operations).
@@ -55,6 +56,15 @@ testConnection: (connection: ServerConnection, password?: string) => Promise<{ o
 
 function generateId(): string {
   return Crypto.randomUUID().replace(/-/g, "").slice(0, 16)
+}
+
+// Resolve the URL a client should actually talk to. Tailscale-type connections
+// go through the embedded tsnet forwarder on loopback (auto-starting the node
+// when needed); every other type connects to the configured URL directly.
+async function resolveBaseUrl(connection: Pick<ServerConnection, "type" | "url">): Promise<string> {
+  if (connection.type !== "tailscale") return connection.url
+  const port = await useTailscale.getState().ensureForward(connection.url)
+  return port ? `http://127.0.0.1:${port}` : connection.url
 }
 
 function buildClient(
@@ -76,10 +86,11 @@ function buildClient(
 async function resolveApi(
   connection: ServerConnection,
   auth?: { username: string; password: string },
+  baseUrl?: string,
 ): Promise<{ api?: ServerApi; resolved: boolean }> {
   if (connection.api) return { api: connection.api, resolved: false }
   try {
-    const identity = await probeServer({ baseUrl: connection.url, directory: connection.directory, auth })
+    const identity = await probeServer({ baseUrl: baseUrl ?? connection.url, directory: connection.directory, auth })
     connection.api = identity.api
     connection.serverVersion = identity.version
     return { api: identity.api, resolved: true }
@@ -120,8 +131,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       if (active) {
         const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${active.id}`)
         const auth = buildAuth(active.username, password)
-        const { api, resolved } = await resolveApi(active, auth)
-        const built = buildClient(active.url, active.directory, auth, api)
+        const baseUrl = await resolveBaseUrl(active)
+        const { api, resolved } = await resolveApi(active, auth, baseUrl)
+        const built = buildClient(baseUrl, active.directory, auth, api)
         client = built.client
         base = built.base
         // Persist a probe that was only just discovered, so the next launch
@@ -183,8 +195,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     if (newConnection.active) {
       activeConnection = newConnection
       const auth = buildAuth(newConnection.username, password)
-      const { api } = await resolveApi(newConnection, auth)
-      const built = buildClient(newConnection.url, newConnection.directory, auth, api)
+      const baseUrl = await resolveBaseUrl(newConnection)
+      const { api } = await resolveApi(newConnection, auth, baseUrl)
+      const built = buildClient(baseUrl, newConnection.directory, auth, api)
       client = built.client
       base = built.base
 
@@ -222,8 +235,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
         const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${newActive.id}`)
         const auth = buildAuth(newActive.username, password)
-        const { api, resolved } = await resolveApi(newActive, auth)
-        const built = buildClient(newActive.url, newActive.directory, auth, api)
+        const baseUrl = await resolveBaseUrl(newActive)
+        const { api, resolved } = await resolveApi(newActive, auth, baseUrl)
+        const built = buildClient(baseUrl, newActive.directory, auth, api)
         if (resolved) await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
         set({ connections, activeConnection: newActive, client: built.client, clientBase: built.base })
       } else {
@@ -251,8 +265,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     if (active) {
       const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${active.id}`)
       const auth = buildAuth(active.username, password)
-      const { api } = await resolveApi(active, auth)
-      const built = buildClient(active.url, active.directory, auth, api)
+      const baseUrl = await resolveBaseUrl(active)
+      const { api } = await resolveApi(active, auth, baseUrl)
+      const built = buildClient(baseUrl, active.directory, auth, api)
       client = built.client
       base = built.base
 
@@ -278,19 +293,22 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   testConnection: async (connection, password) => {
     try {
       const auth = buildAuth(connection.username, password)
+      // Tailscale-type connections probe the loopback forward (auto-starting
+      // the embedded node); everything else probes the configured URL.
+      const baseUrl = await resolveBaseUrl(connection)
       // Probe before anything else. Against a v1 server the v2 health route is not
       // a route at all — it falls through to the web SPA and answers 200 with HTML,
       // which used to read as "connected" and then failed on every real request.
-      const identity = await probeServer({ baseUrl: connection.url, directory: connection.directory, auth })
+      const identity = await probeServer({ baseUrl, directory: connection.directory, auth })
       const client = createClient({
-        baseUrl: connection.url,
+        baseUrl,
         directory: connection.directory,
         auth,
         api: identity.api,
       })
 
       await client.global.health(CONNECTION_TEST_TIMEOUT_MS)
-      return { ok: true, api: identity.api, serverVersion: identity.version }
+      return { ok: true, api: identity.api, serverVersion: identity.version, probeUrl: baseUrl }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return { ok: false, error: message }
@@ -326,8 +344,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       const active = connections.find((c) => c.id === id)!
       const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${id}`)
       const auth = buildAuth(active.username, password)
-      const { api, resolved } = await resolveApi(active, auth)
-      const built = buildClient(active.url, active.directory, auth, api)
+      const baseUrl = await resolveBaseUrl(active)
+      const { api, resolved } = await resolveApi(active, auth, baseUrl)
+      const built = buildClient(baseUrl, active.directory, auth, api)
       if (resolved) await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
       try {
         const [project, paths] = await Promise.all([

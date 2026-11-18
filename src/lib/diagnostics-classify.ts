@@ -11,6 +11,8 @@ export type Classification =
   | "health-failed"
   | "tls-error"
   | "timeout"
+  | "tailscale-down"
+  | "tailscale-error"
   | "unknown"
 
 export interface ProbeAttempt {
@@ -48,9 +50,25 @@ export function classify(
   health: ProbeAttempt,
   internet: ProbeAttempt,
   root: ProbeAttempt,
+  tailscale?: { connected: boolean; error?: string },
 ): { classification: Classification; summary: string } {
   if (!parsed.valid) {
     return { classification: "malformed-url", summary: "The server URL could not be parsed. Check for typos or extra characters." }
+  }
+  // The embedded Tailscale node gates everything else for tailscale-type
+  // connections: the probes run against its loopback forward, so a node that
+  // is not connected makes every other classification meaningless.
+  if (tailscale && !tailscale.connected) {
+    if (tailscale.error) {
+      return {
+        classification: "tailscale-error",
+        summary: `The embedded Tailscale node failed: ${tailscale.error}. Check the Control URL and Auth Key in Settings → Tailscale.`,
+      }
+    }
+    return {
+      classification: "tailscale-down",
+      summary: "The embedded Tailscale node is not connected. Open Settings → Tailscale, check the Control URL and Auth Key, and start it before connecting.",
+    }
   }
   if (health.ok) {
     return { classification: "ok", summary: "Health endpoint responded — connection actually works now." }

@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons"
 import { useTranslation } from "react-i18next"
 import { useConnections } from "../../src/stores/connections"
 import { useEvents } from "../../src/stores/events"
+import { useTailscale } from "../../src/stores/tailscale"
 import type { ConnectionType } from "../../src/lib/types"
 import { probeConnection, shareReport, translatedFailureSummary } from "../../src/lib/diagnostics"
 import { parseUrl } from "../../src/lib/diagnostics-classify"
@@ -33,6 +34,7 @@ const CONNECTION_TYPES: Array<{
   { type: "local", labelKey: "connection.shared.types.local", icon: "wifi" },
   { type: "tunnel", labelKey: "connection.shared.types.tunnel", icon: "globe" },
   { type: "cloud", labelKey: "connection.shared.types.cloud", icon: "cloud" },
+  { type: "tailscale", labelKey: "connection.shared.types.tailscale", icon: "shield-checkmark" },
 ]
 
 export default function EditConnectionScreen() {
@@ -81,6 +83,20 @@ export default function EditConnectionScreen() {
       Alert.alert(t("connection.shared.alerts.invalidUrlTitle"), t("connection.shared.alerts.invalidUrlMessage"))
       return
     }
+    if (type === "tailscale") {
+      const tsState = useTailscale.getState()
+      if (tsState.controlUrl.trim() === "" || tsState.authKey.trim() === "") {
+        Alert.alert(
+          t("connection.shared.alerts.tailscaleConfigTitle"),
+          t("connection.shared.alerts.tailscaleConfigMessage"),
+          [
+            { text: t("common.cancel"), style: "cancel" },
+            { text: t("settings.tailscale.openSettings"), onPress: () => router.push("/settings/tailscale") },
+          ],
+        )
+        return
+      }
+    }
 
     setIsTesting(true)
     const result = await testConnection(
@@ -102,7 +118,11 @@ export default function EditConnectionScreen() {
     }
 
     // Failed: run active diagnostics and offer a shareable report.
-    const report = await probeConnection(url.trim(), buildAuth(username, password))
+    const tsState = useTailscale.getState()
+    const report = await probeConnection(result.probeUrl ?? url.trim(), buildAuth(username, password), {
+      tailscale:
+        type === "tailscale" ? { connected: tsState.phase === "connected", error: tsState.error } : undefined,
+    })
     setIsTesting(false)
 
     Alert.alert(

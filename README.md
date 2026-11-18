@@ -53,6 +53,7 @@ OpenCode Mobile is a React Native / Expo app that brings the power of the [openc
 
 - **Offline demo mode** — tap "Try a Demo" to see a full bug-fix walkthrough (reasoning → grep → diff → permission prompt) with zero setup, right from the empty state
 - **Multi-connection** — manage multiple opencode servers (local network, Cloudflare Tunnel, ngrok, or Tailscale)
+- **Built-in Tailscale** — reach your server over a tailnet without installing the Tailscale app: an embedded tsnet node forwards app traffic through an encrypted loopback proxy. Works with self-hosted Headscale (control server URL + auth key in Settings → Tailscale). Requires Android 8.0+; arm64 devices
 - **Biometric unlock** — Face ID, Touch ID, or Android fingerprint protects the app and individual message sends
 - **Streaming chat** — token-by-token streaming responses directly from your opencode server
 - **Diff viewer** — inline side-by-side diffs of every file change the agent makes
@@ -144,6 +145,7 @@ OpenCode Mobile is a thin client. It speaks the opencode HTTP + SSE API: listing
 | Offline demo mode | Stable |
 | First-run onboarding clarity | Stable |
 | Multi-connection management | Stable |
+| Built-in Tailscale (embedded tsnet node) | Experimental |
 | Session list + creation | Stable |
 | Streaming chat | Stable |
 | Diff viewer | Stable |

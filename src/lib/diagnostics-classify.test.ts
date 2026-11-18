@@ -178,3 +178,28 @@ test("server-unreachable adds MagicDNS hint only for hostnames, not IPs", () => 
   assert.match(hostR.summary, /MagicDNS/)
   assert.doesNotMatch(ipR.summary, /MagicDNS/)
 })
+
+// --- embedded Tailscale gating ------------------------------------------------
+
+test("tailscale node down short-circuits to tailscale-down before any network verdict", () => {
+  // Even a healthy health probe is meaningless: it could only have run
+  // against the loopback forward, which requires a connected node.
+  const r = classify(okUrl, probe({ ok: true, status: 200 }), probe({ ok: true }), probe({ ok: true }), {
+    connected: false,
+  })
+  assert.equal(r.classification, "tailscale-down")
+  assert.match(r.summary, /Tailscale/)
+})
+
+test("tailscale node error surfaces the node error", () => {
+  const r = classify(okUrl, probe(), probe(), probe(), { connected: false, error: "auth key is invalid" })
+  assert.equal(r.classification, "tailscale-error")
+  assert.match(r.summary, /auth key is invalid/)
+})
+
+test("connected tailscale node falls through to normal classification", () => {
+  const r = classify(okUrl, probe({ error: "connection refused" }), probe({ ok: true }), probe({ ok: false }), {
+    connected: true,
+  })
+  assert.equal(r.classification, "server-unreachable")
+})

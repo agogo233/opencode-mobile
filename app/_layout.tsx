@@ -13,6 +13,7 @@ import { useConnections } from "../src/stores/connections"
 import { useEvents } from "../src/stores/events"
 import { useCatalog } from "../src/stores/catalog"
 import { useSettings } from "../src/stores/settings"
+import { useTailscale } from "../src/stores/tailscale"
 import { AuthGate } from "../src/components/AuthGate"
 import { ErrorBoundary } from "../src/components/ErrorBoundary"
 import * as notifications from "../src/lib/notifications"
@@ -33,6 +34,7 @@ function RootLayout() {
     initAuth()
     loadConnections()
     useSettings.getState().load()
+    useTailscale.getState().loadConfig()
 
     // Connect notification preferences to the notification module
     notifications.configure(() => useSettings.getState().notifications)
@@ -172,6 +174,7 @@ function RootLayout() {
               />
               <Stack.Screen name="file-browser" options={{ title: t("fileBrowser.title") }} />
               <Stack.Screen name="file-preview" options={{ title: t("filePreview.title") }} />
+              <Stack.Screen name="settings/tailscale" options={{ title: t("settings.tailscale.page.title") }} />
             </Stack>
               <StatusBar style={isDark ? "light" : "dark"} />
             </AuthGate>

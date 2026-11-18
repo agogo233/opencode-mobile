@@ -3,6 +3,8 @@ node_modules/
 android/.gradle/
 android/app/build/
 android/build/
+# Embedded Tailscale forwarder AAR — built by scripts/build-tailscale-aar.sh
+android/app/libs/*.aar
 ios/Pods/
 *.apk
 *.aab

@@ -16,9 +16,52 @@
   "settings": {
     "sections": {
       "security": "Security",
+      "tailscale": "Tailscale",
       "notifications": "Notifications",
       "privacy": "Privacy",
       "about": "About"
+    },
+    "tailscale": {
+      "label": "Tailscale",
+      "subtitleIdle": "Not set up — connect via your tailnet",
+      "subtitleConnecting": "Connecting…",
+      "subtitleRunning": "Connected · {{ip}}",
+      "subtitleError": "Error — open to fix",
+      "subtitleOff": "Disconnected",
+      "unavailable": "Unavailable on this platform",
+      "openSettings": "Open Tailscale settings",
+      "page": {
+        "title": "Tailscale",
+        "statusTitle": "Status",
+        "phase": {
+          "new": "Not set up",
+          "configured": "Ready to start",
+          "connecting": "Connecting…",
+          "connected": "Connected",
+          "error": "Error",
+          "closed": "Stopped"
+        },
+        "unavailable": "The embedded Tailscale node is not available in this build.",
+        "localAddress": "Tailscale IP",
+        "copy": "Copy",
+        "copied": "Copied!",
+        "deviceName": "Node name",
+        "identityTitle": "Identity",
+        "controlUrl": "Control server URL",
+        "controlUrlHint": "Your Headscale (or Tailscale) control server, e.g. https://headscale.example.com",
+        "authKey": "Auth key",
+        "authKeyHint": "Required for the first connect; stored in the Android Keystore",
+        "hostnameLabel": "Node name on the tailnet",
+        "hostnameHint": "Leave blank to auto-generate",
+        "start": "Start",
+        "stop": "Stop",
+        "retry": "Retry",
+        "starting": "Starting…",
+        "stopping": "Stopping…",
+        "notConfiguredTitle": "Tailscale is not set up",
+        "notConfigured": "Enter the control server URL and an auth key first.",
+        "help": "The first connect needs an auth key from your Tailscale or Headscale admin. The node identity is kept on this device, so later starts reconnect automatically. Traffic to the opencode server is end-to-end encrypted through your tailnet."
+      }
     },
     "security": {
       "biometricOpen": {
@@ -163,7 +206,8 @@
       "types": {
         "local": "Local",
         "tunnel": "Tunnel",
-        "cloud": "Cloud"
+        "cloud": "Cloud",
+        "tailscale": "Tailscale"
       },
       "name": "Name",
       "namePlaceholder": "My Server",
@@ -180,7 +224,9 @@
         "connectionFailedTitle": "Connection Failed",
         "unknownError": "Unknown error",
         "saveFailedTitle": "Couldn't Save Connection",
-        "saveFailedMessage": "The connection test succeeded, but saving it failed. Please try again."
+        "saveFailedMessage": "The connection test succeeded, but saving it failed. Please try again.",
+        "tailscaleConfigTitle": "Tailscale is not set up",
+        "tailscaleConfigMessage": "Add your control server URL and auth key in Settings → Tailscale first."
       }
     },
     "add": {
@@ -192,6 +238,9 @@
         "namePlaceholder": "My Mac",
         "passwordIfSetLabel": "Password (if set on server)",
         "passwordPlaceholder": "Leave empty if none",
+        "viaTailscale": "Connect through built-in Tailscale",
+        "viaTailscaleHint": "Traffic goes through the app's embedded encrypted tailnet node — no separate Tailscale app needed",
+        "tailscaleSetupHint": "Set up Tailscale first: add your control server URL and auth key.",
         "usernameHintPrefix": "Username defaults to ",
         "usernameHintMiddle": ". Custom username? Use ",
         "usernameHintSuffix": ".",
@@ -245,7 +294,9 @@
       "noInternet": "The device has no working internet/network at all (public check also failed). Check Wi-Fi/data and Tailscale (VPN) status.",
       "timeout": "Connection to the server timed out (dropped, not refused). Likely a firewall, wrong port, or Tailscale ACL blocking the device.",
       "serverUnreachable": "Internet works, but the server at {{host}}:{{port}} is unreachable. Confirm the opencode server is running, the device is on the same tailnet, and the port is correct.",
-      "serverUnreachableDns": "Internet works, but the server at {{host}}:{{port}} is unreachable. Hostname may not resolve from this device (MagicDNS off?). Try the raw Tailscale IP. Confirm the opencode server is running, the device is on the same tailnet, and the port is correct."
+      "serverUnreachableDns": "Internet works, but the server at {{host}}:{{port}} is unreachable. Hostname may not resolve from this device (MagicDNS off?). Try the raw Tailscale IP. Confirm the opencode server is running, the device is on the same tailnet, and the port is correct.",
+      "tailscaleDown": "The embedded Tailscale node is not connected. Open Settings → Tailscale, check the Control URL and Auth Key, and start it before connecting.",
+      "tailscaleError": "The embedded Tailscale node failed: {{error}}. Check the Control URL and Auth Key in Settings → Tailscale."
     }
   },
   "nav": {
@@ -257,6 +308,8 @@
   },
   "connectionsList": {
     "activeBadge": "Active",
+    "tailscaleDown": "Tailscale disconnected",
+    "tailscaleReconnect": "Reconnect",
     "lastConnected": "Last connected: {{date}}",
     "actionsAlert": {
       "message": "What would you like to do?",
