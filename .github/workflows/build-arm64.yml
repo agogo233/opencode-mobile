@@ -46,7 +46,8 @@ jobs:
           go-version: "1.23"
 
       - name: Go tests (embedded forwarder)
-        run: go test ./native/tailscale-go
+        working-directory: native/tailscale-go
+        run: go test ./...
 
       - name: Setup Android NDK
         id: setup-ndk
