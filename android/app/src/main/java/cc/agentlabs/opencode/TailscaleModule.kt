@@ -39,8 +39,15 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     private var networkWatcherRegistered = false
     // Identity of the last start() so a repeated call with the same config can
     // skip the expensive close + reconnect (tsnet bring-up can take seconds).
+    // Volatile: a keyless enrollment runs on its own thread while the shared
+    // executor keeps serving other methods.
+    @Volatile
     private var startedControlUrl: String? = null
+
+    @Volatile
     private var startedAuthKey: String? = null
+
+    @Volatile
     private var startedHostname: String? = null
 
     override fun getName() = "Tailscale"
@@ -76,31 +83,37 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun start(controlUrl: String, authKey: String, hostname: String, promise: Promise) {
-        dispatch(promise) {
+        val task: () -> Unit = {
             try {
                 // Interface info must be supplied before tsnet boots: Android
                 // denies Go's netlink interface enumeration on API 30+.
                 injectNetworkInterfaces()
                 registerNetworkWatcher()
-                if (forwarder.getPhase() == "connected" &&
+                val sameIdentity = forwarder.getPhase() == "connected" &&
                     startedControlUrl == controlUrl &&
                     startedAuthKey == authKey &&
                     startedHostname == hostname
-                ) {
-                    promise.resolve(statusMap())
-                    return@dispatch
+                if (!sameIdentity) {
+                    forwarder.close() // idempotent reset so a new config always applies
+                    val stateDir = File(reactContext.filesDir, "tailscale").absolutePath
+                    forwarder.configureControl(authKey, controlUrl, hostname, stateDir)
+                    startedControlUrl = controlUrl
+                    startedAuthKey = authKey
+                    startedHostname = hostname
+                    forwarder.connect()
                 }
-                forwarder.close() // idempotent reset so a new config always applies
-                val stateDir = File(reactContext.filesDir, "tailscale").absolutePath
-                forwarder.configureControl(authKey, controlUrl, hostname, stateDir)
-                startedControlUrl = controlUrl
-                startedAuthKey = authKey
-                startedHostname = hostname
-                forwarder.connect()
                 promise.resolve(statusMap())
             } catch (e: Exception) {
                 promise.reject("TS_START", e.message, e)
             }
+        }
+        if (authKey.isBlank()) {
+            // Keyless interactive enrollment blocks for minutes while the user
+            // approves the node in the control server's web UI. Keep the shared
+            // executor free so status()/forward() keep answering meanwhile.
+            Thread(task, "tailscale-enroll").start()
+        } else {
+            dispatch(promise, task)
         }
     }
 
@@ -167,6 +180,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         map.putString("phase", forwarder.getPhase())
         map.putString("hostname", forwarder.getHostname())
         map.putString("error", forwarder.getLastError())
+        map.putString("loginUrl", forwarder.getLoginURL())
         map.putInt("forwardCount", forwarder.getForwardCount().toInt())
         val addresses = WritableNativeMap()
         addresses.putString("ipv4", forwarder.getTailscaleIPv4())
