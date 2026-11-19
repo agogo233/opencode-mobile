@@ -12,6 +12,7 @@ import com.facebook.react.ReactHost
 import com.facebook.react.common.ReleaseLevel
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.facebook.react.modules.network.OkHttpClientProvider
 
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
@@ -41,6 +42,12 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Direct-connect mode: route tailnet destinations through the embedded
+    // tsnet SOCKS5 proxy. Applies to every RN/expo OkHttp client built after
+    // this point; the selector falls back to direct when the proxy is off.
+    OkHttpClientProvider.setOkHttpClientFactory { client ->
+      client.newBuilder().proxySelector(TailscaleProxySelector()).build()
+    }
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {

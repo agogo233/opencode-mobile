@@ -71,6 +71,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         startedAuthKey = null
         startedHostname = null
         startedEphemeral = false
+        TailscaleProxyState.socksPort = 0
     }
 
     // Runs a task on the bridge executor. After the catalyst instance is
@@ -100,6 +101,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
                     startedEphemeral == ephemeral
                 if (!sameIdentity) {
                     forwarder.close() // idempotent reset so a new config always applies
+                    TailscaleProxyState.socksPort = 0
                     val stateDir = File(reactContext.filesDir, "tailscale").absolutePath
                     forwarder.configureControl(authKey, controlUrl, hostname, stateDir)
                     forwarder.setEphemeral(ephemeral)
@@ -109,6 +111,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
                     startedEphemeral = ephemeral
                     forwarder.connect()
                 }
+                ensureSocks5Proxy()
                 promise.resolve(statusMap())
             } catch (e: Exception) {
                 promise.reject("TS_START", e.message, e)
@@ -208,6 +211,14 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    // Direct-connect mode: one loopback SOCKS5 proxy serves every tailnet
+    // target through the global OkHttp proxy selector. Ephemeral port; the
+    // selector reads the live port from TailscaleProxyState.
+    private fun ensureSocks5Proxy() {
+        if (TailscaleProxyState.socksPort != 0) return
+        TailscaleProxyState.socksPort = forwarder.startSocks5(0).toInt()
+    }
+
     private fun statusMap(): WritableNativeMap {
         // Use the primitive getters: gomobile struct-returning methods are not
         // usable from Kotlin here, and these map 1:1 onto the State fields.
@@ -217,6 +228,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         map.putString("error", forwarder.getLastError())
         map.putString("loginUrl", forwarder.getLoginURL())
         map.putInt("forwardCount", forwarder.getForwardCount().toInt())
+        map.putInt("socksPort", TailscaleProxyState.socksPort)
         val addresses = WritableNativeMap()
         addresses.putString("ipv4", forwarder.getTailscaleIPv4())
         addresses.putString("ipv6", forwarder.getTailscaleIPv6())

@@ -70,6 +70,10 @@ type Forwarder struct {
 	lastErr    string
 	loginURL   string
 	forwards   map[string]*forward
+	// socks is the single loopback SOCKS5 proxy backing the direct-connect
+	// mode, where the app's HTTP stack reaches any tailnet target without
+	// per-target forward plumbing. Guarded by forwardMu.
+	socks *socksProxy
 }
 
 // New returns an unconfigured forwarder.
@@ -532,8 +536,10 @@ func (f *Forwarder) GetTailscaleIPv6() string {
 	return ""
 }
 
-// Close stops all forwards and closes the tsnet server. It is idempotent.
+// Close stops all forwards and the loopback SOCKS5 proxy and closes the tsnet
+// server. It is idempotent.
 func (f *Forwarder) Close() {
+	f.StopSocks5()
 	f.StopAll()
 	f.mu.Lock()
 	server := f.server
