@@ -217,3 +217,21 @@ func TestSetAndroidNetworkInterfacesRejectsInvalidJSON(t *testing.T) {
 		t.Fatal("accepted invalid Android interface JSON")
 	}
 }
+
+func TestApplyAndroidDirs(t *testing.T) {
+	for _, key := range []string{"TS_LOGS_DIR", "TMPDIR", "HOME"} {
+		t.Setenv(key, "")
+	}
+	if err := applyAndroidDirs("/data/app/tailscale"); err != nil {
+		t.Fatalf("applyAndroidDirs() error = %v", err)
+	}
+	for key, want := range map[string]string{
+		"TS_LOGS_DIR": "/data/app/tailscale",
+		"TMPDIR":      "/data/app/tailscale",
+		"HOME":        "/data/app/tailscale",
+	} {
+		if got := os.Getenv(key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}

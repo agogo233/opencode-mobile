@@ -190,10 +190,8 @@ func (f *Forwarder) Connect() (err error) {
 	}
 	f.mu.Unlock()
 
-	// Android does not provide the Unix cache/temp locations that Tailscale's
-	// log policy normally discovers. Reuse the app-private tsnet directory.
-	if err := os.Setenv("TS_LOGS_DIR", f.stateDir); err != nil {
-		return f.failInFlight(server, fmt.Errorf("set tsnet log directory: %w", err))
+	if err := applyAndroidDirs(f.stateDir); err != nil {
+		return f.failInFlight(server, err)
 	}
 
 	if err := server.Start(); err != nil {
@@ -232,6 +230,23 @@ func (f *Forwarder) failInFlight(server *tsnet.Server, wrapped error) error {
 	}
 	f.mu.Unlock()
 	return f.redactErr(wrapped)
+}
+
+// applyAndroidDirs points the Go runtime's well-known locations at the
+// app-private tsnet state directory. Android lacks the Unix cache/temp
+// locations that Tailscale's log policy discovers, and some ROMs additionally
+// expect HOME and TMPDIR to be writable before any Tailscale call is made.
+func applyAndroidDirs(stateDir string) error {
+	for key, val := range map[string]string{
+		"TS_LOGS_DIR": stateDir,
+		"TMPDIR":      stateDir,
+		"HOME":        stateDir,
+	} {
+		if err := os.Setenv(key, val); err != nil {
+			return fmt.Errorf("set %s: %w", key, err)
+		}
+	}
+	return nil
 }
 
 // HasPersistedLogin reports whether a previous Connect completed successfully
