@@ -11,7 +11,7 @@
 // unit-testable outside RN.
 import { fetch as expoFetch } from "expo/fetch"
 import { buildRequestHeaders } from "./headers"
-import { SSEParser } from "./sse"
+import { SSEParser, SSE_DIAL_TIMEOUT_MS, SSE_LIVENESS_EVENT_TYPE } from "./sse"
 import { apiErrorFor, isAuthStatus } from "./api-error"
 import { loadSessionList } from "./session-list"
 import type { FileRoot } from "./file-roots"
@@ -71,6 +71,10 @@ export interface Session {
   title: string
   version: string
   share?: { url: string }
+  // Carried from V2SessionInfo so the subagent surface (#187) can show the
+  // child agent/model without a per-child fetch. Absent on v1/legacy servers.
+  agent?: string
+  model?: { providerID: string; modelID: string }
   time: {
     created: number
     updated: number
@@ -78,7 +82,10 @@ export interface Session {
     archived?: number
     // v2 servers stamp the last idle transition here; `updated > idle` hints
     // the session may still be running (cold-start indicator before any SSE
-    // session.status event arrives). Absent on v1 servers.
+    // session.status event arrives). Absent on v1 servers. Present when the
+    // server marks the session finished; the server does not populate it on
+    // every response (OQ3) — a cold-loaded child without it reads Idle until
+    // a live busy -> idle transition is observed.
     idle?: number
   }
   summary?: {
@@ -381,8 +388,29 @@ function createV2Client(config: ClientConfig) {
         // Remove Content-Type for SSE (it's text/event-stream)
         delete (headers as Record<string, string>)["Content-Type"]
 
-        // Must use expo/fetch for ReadableStream support on native
-        const response = await expoFetch(url, { headers, signal })
+        // Bound the dial: the 45s idle watchdog only wraps reader.read()
+        // AFTER headers arrive, so a black-holed dial would park the
+        // reconnect loop forever — the loop's finally never runs,
+        // attemptInFlight never clears, and reconnectNow() no-ops (#186
+        // Finding 2). A dedicated timeout controller aborts the dial; the
+        // parent signal still aborts it too (connect()/disconnect()).
+        const dialController = new AbortController()
+        const dialTimer = setTimeout(() => dialController.abort(), SSE_DIAL_TIMEOUT_MS)
+        const onParentAbort = () => dialController.abort()
+        signal?.addEventListener("abort", onParentAbort)
+        let response: Response
+        try {
+          // Must use expo/fetch for ReadableStream support on native
+          response = await expoFetch(url, { headers, signal: dialController.signal })
+        } catch (err) {
+          if (dialController.signal.aborted && !signal?.aborted) {
+            throw new Error(`SSE dial timed out after ${SSE_DIAL_TIMEOUT_MS / 1000}s — server not responding`)
+          }
+          throw err
+        } finally {
+          clearTimeout(dialTimer)
+          signal?.removeEventListener("abort", onParentAbort)
+        }
         if (!response.ok || !response.body) {
           throw apiErrorFor(response.status, `Failed to connect to event stream: ${response.status}`)
         }
@@ -412,11 +440,19 @@ function createV2Client(config: ClientConfig) {
               console.log(`[SSE] first byte received (${value?.byteLength ?? 0} bytes)`)
             }
 
+            // Yield a liveness-only event when this chunk carried no session
+            // event: on a quiet server the only traffic is the subscribe
+            // frame (server.connected, dropped by the translator) and
+            // heartbeat comments (never parsed as data). Without this the
+            // events store never sees evidence the stream is live, so a
+            // healthy idle server would read amber forever (Finding 1).
+            let yielded = 0
             for (const data of parser.push(decoder.decode(value, { stream: true }))) {
               try {
                 const raw = JSON.parse(data) as V2RawEvent
                 for (const translated of translator.translate(raw)) {
                   yield translated
+                  yielded++
                 }
               } catch (err) {
                 console.warn("[SSE] Failed to parse event", {
@@ -424,6 +460,9 @@ function createV2Client(config: ClientConfig) {
                   error: err instanceof Error ? err.message : String(err),
                 })
               }
+            }
+            if (yielded === 0) {
+              yield { type: SSE_LIVENESS_EVENT_TYPE, properties: {} }
             }
           }
         } finally {
@@ -564,12 +603,24 @@ project: {
 
       get: getSession,
 
-      create: async (params?: { title?: string }): Promise<Session> => {
-        const body = await request<{ data: V2SessionInfo }>(config, "/api/session", {
+      create: async (params?: { title?: string; directory?: string; location?: { directory: string } }): Promise<Session> => {
+        const body: Record<string, unknown> = { ...(params || {}) }
+        // v2 creates a session at an explicit location. Older callers (and the
+        // directory-scoped clients built via clientForDirectory) rely on the
+        // client's configured directory, so default to it when no location is
+        // given. `directory` is an app-level shorthand that maps to location.
+        if (!body.location) {
+          const dir = params?.directory ?? config.directory
+          if (dir) body.location = { directory: dir }
+        }
+        // `directory` is not part of the v2 request schema (additionalProperties
+        // is false), so strip it after converting to `location`.
+        delete body.directory
+        const response = await request<{ data: V2SessionInfo }>(config, "/api/session", {
           method: "POST",
-          body: JSON.stringify(params || {}),
+          body: JSON.stringify(body),
         })
-        return toSession(body.data)
+        return toSession(response.data)
       },
 
       delete: (sessionID: string) => request<void>(config, `/api/session/${sessionID}`, { method: "DELETE" }),

@@ -12,9 +12,15 @@ import {
   Alert,
   Animated,
   AppState,
+  Keyboard,
+  ToastAndroid,
+  useWindowDimensions,
+  type CellRendererProps,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
 } from "react-native"
 import { KeyboardAvoidingView } from "react-native-keyboard-controller"
-import { useLocalSearchParams, Stack, useRouter, useFocusEffect } from "expo-router"
+import { useLocalSearchParams, useRouter, useFocusEffect, useNavigation } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useTranslation } from "react-i18next"
@@ -37,6 +43,7 @@ import {
   ImageAttachments,
   SessionInfo,
   MessageTextSheet,
+  SubagentSection,
   type SlashCommand,
   type Attachment,
   type MentionItem,
@@ -53,6 +60,9 @@ import { mimeForPath } from "../../src/lib/file-mime"
 import { nameOf } from "../../src/lib/path-utils"
 import { messagePartsToSelectableText } from "../../src/lib/message-text"
 import type { Message } from "../../src/lib/sdk"
+import { shouldAutoScroll, shouldShowScrollButton } from "../../src/lib/auto-scroll"
+import { MessageNavigation } from "../../src/lib/message-navigation"
+import { composerMaxHeight } from "../../src/lib/session-layout"
 
 // --- Builtin slash commands ---
 function builtinCommands(t: (key: string) => string): SlashCommand[] {
@@ -112,6 +122,24 @@ export default function SessionScreen() {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [showInfo, setShowInfo] = useState(false)
+  const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions()
+  const [keyboardY, setKeyboardY] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return
+    const show = Keyboard.addListener("keyboardDidShow", (event) => {
+      setKeyboardY(event.endCoordinates.screenY)
+    })
+    const hide = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardY(null)
+    })
+    return () => {
+      show.remove()
+      hide.remove()
+    }
+  }, [])
+
+  const inputMaxHeight = composerMaxHeight(Platform.OS, windowHeight, keyboardY, insets.top, fontScale)
   // Raw text of the message opened in the full-screen selection sheet
   const [textSheet, setTextSheet] = useState<string | null>(null)
 
@@ -194,8 +222,26 @@ export default function SessionScreen() {
   const browseRootDir =
     currentSession?.directory || activeConnection?.directory || currentProject?.path?.absolute || serverHome || null
 
+  // Message navigation (#214) — docked strip, not floating controls.
+  // `nav` is the placement-independent navigation math ported from draft
+  // PR #215 (src/lib/message-navigation.ts); that PR's floating placement
+  // and paddingRight:76 gutter were UX-rejected and are not carried over.
+  // `navigation` is already taken by expo-router's useNavigation below,
+  // hence the short name.
+  const nav = useRef(new MessageNavigation()).current
+  const navRetry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const navAttempts = useRef(0)
+  // Set by a Previous tap at the oldest loaded message while older pages
+  // exist: the load is in flight, advance into the new batch when it lands.
+  const pendingNavLoad = useRef(false)
+  // Index into nav.ids (newest first) of the current navigable message;
+  // -1 while unknown. Mirrored into state so the strip counter and the
+  // Previous/Next disabled states re-render on scroll and content change.
+  const [currentNavIndex, setCurrentNavIndex] = useState(-1)
+
   // SSE reconnect banner
   const reconnectAttempts = useEvents((s) => s.reconnectAttempts)
+  const lastDisconnectReason = useEvents((s) => s.lastDisconnectReason)
   const [showConnectedFlash, setShowConnectedFlash] = useState(false)
   const prevReconnecting = useRef(false)
 
@@ -363,6 +409,68 @@ export default function SessionScreen() {
     [messages, revertMessageID],
   )
 
+  // Navigable set (#214 AF-3): user + assistant messages with visible
+  // content. The SDK types roles as "user" | "assistant" only, and
+  // MessageBubble renders a visible bubble (role header at minimum) for
+  // every message, so there are no in-list invisible rows to skip —
+  // banners, status and prompts all live outside the FlatList. The filter
+  // stays as the explicit predicate so a future role can't silently join
+  // the navigation set.
+  const navigableIds = useMemo(
+    () =>
+      messageData
+        .filter((item) => item.message.role === "user" || item.message.role === "assistant")
+        .map((item) => item.message.id),
+    [messageData],
+  )
+  nav.sync(navigableIds)
+
+  const seekMessage = useCallback(() => {
+    if (navRetry.current) clearTimeout(navRetry.current)
+    if (flatListRef.current && nav.seek(flatListRef.current, navAttempts.current++)) {
+      navRetry.current = setTimeout(seekMessage, 100)
+    }
+  }, [nav])
+
+  // Cell renderer that records each row's measured frame for navigation.
+  // Frames arrive via onLayout as rows mount or resize (streaming growth)
+  // and are dropped when a row unmounts; a pending seek resumes as soon as
+  // its target's frame lands (see seekMessage above).
+  const MessageCell = useCallback(
+    (props: CellRendererProps<(typeof messageData)[number]>) => {
+      const key = props.item.message.id
+      const { onLayout, ...cell } = props
+      useEffect(() => () => {
+        nav.frames.delete(key)
+      }, [key, nav])
+      return (
+        <View
+          {...cell}
+          onLayout={(event) => {
+            nav.frames.set(key, event.nativeEvent.layout)
+            onLayout?.(event)
+            if (nav.target === key) seekMessage()
+          }}
+        >
+          {props.children}
+        </View>
+      )
+    },
+    [nav, seekMessage],
+  )
+
+  // New session: drop any in-flight seek, target and anchor — the frames
+  // belong to the previous transcript.
+  useEffect(() => {
+    nav.manual()
+    nav.frames.clear()
+    pendingNavLoad.current = false
+    setCurrentNavIndex(-1)
+    return () => {
+      if (navRetry.current) clearTimeout(navRetry.current)
+    }
+  }, [id, nav])
+
   // Tracks the latest composer text without pulling `input` into startEditFlow's
   // deps — kept as a plain ref assignment (not state) so the callback stays
   // referentially stable across keystrokes for MessageBubble's memo comparator.
@@ -447,9 +555,48 @@ export default function SessionScreen() {
   // must not pop a menu, because a long-press on the bubble competed with
   // horizontal scrolling in code blocks and with text selection.
 
-  const scrollToBottom = useCallback((animated = true) => {
-    flatListRef.current?.scrollToOffset({ offset: 0, animated })
-  }, [])
+  const scrollToBottom = useCallback(
+    (animated = true) => {
+      // Latest resets the logical viewport before its native callback
+      // arrives, so a stale scroll event queued mid-jump can't resurrect
+      // the old position (see the "Latest resets" regression in
+      // message-navigation.test.ts).
+      nav.manual(0)
+      if (navRetry.current) clearTimeout(navRetry.current)
+      flatListRef.current?.scrollToOffset({ offset: 0, animated })
+    },
+    [nav],
+  )
+
+  // Follow new content (issue #155: "Message cannot be scrolled automatically").
+  //
+  // scrollToBottom() was previously only wired to the manual scroll button, so
+  // nothing followed an arriving or streaming message. Compounding that,
+  // maintainVisibleContentPosition (below) deliberately holds visible items
+  // still when the data changes — and since new messages are inserted at index
+  // 0 of this inverted list, that setting parks new content just outside the
+  // viewport. That prop is worth keeping (it stops the jump when older pages
+  // load), so instead scroll explicitly.
+  //
+  // Only when the user is already at the bottom: someone who scrolled up to
+  // read history must not be yanked back down mid-sentence. See
+  // src/lib/auto-scroll.ts.
+  const newest = messageData[0]
+  // The screen deliberately does not subscribe to per-token parts (row-level
+  // subscriptions in MessageBubble own those), so the signature keys on the
+  // message count + newest message id — enough to auto-follow new content
+  // without re-rendering the whole screen on every streamed token.
+  const contentSignature = `${messageData.length}:${newest ? newest.message.id : ""}`
+  const prevSignatureRef = useRef<string | null>(null)
+  useEffect(() => {
+    const auto = shouldAutoScroll({
+      offsetY: scrollOffsetRef.current,
+      previousSignature: prevSignatureRef.current,
+      currentSignature: contentSignature,
+    })
+    prevSignatureRef.current = contentSignature
+    if (auto) scrollToBottom(true)
+  }, [contentSignature, scrollToBottom])
 
   // Stable row renderer: a fresh closure per SessionScreen render would make
   // FlatList rebuild every visible row's element on each render, even though
@@ -570,12 +717,19 @@ export default function SessionScreen() {
   }
 
   const pickFromLibrary = useCallback(async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsMultipleSelection: true,
-      selectionLimit: 10,
-      quality: 1, // full quality - we compress in manipulator
-    })
+    let result: ImagePicker.ImagePickerResult
+    try {
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
+        quality: 1, // full quality - we compress in manipulator
+      })
+    } catch (err) {
+      console.error("Failed to launch image library:", err)
+      Alert.alert(t("session.alerts.imageFailedTitle"), t("session.alerts.imageFailedMessage"))
+      return
+    }
     if (result.canceled) return
     const settled = await Promise.allSettled(result.assets.map((a) => toJpeg(a.uri, a.width, a.height)))
     const items = settled.filter((r) => r.status === "fulfilled").map((r) => r.value)
@@ -595,7 +749,14 @@ export default function SessionScreen() {
       Alert.alert(t("session.alerts.cameraPermissionTitle"), t("session.alerts.cameraPermissionMessage"))
       return
     }
-    const result = await ImagePicker.launchCameraAsync({ quality: 1 })
+    let result: ImagePicker.ImagePickerResult
+    try {
+      result = await ImagePicker.launchCameraAsync({ quality: 1 })
+    } catch (err) {
+      console.error("Failed to launch camera:", err)
+      Alert.alert(t("session.alerts.imageFailedTitle"), t("session.alerts.imageFailedMessage"))
+      return
+    }
     if (result.canceled) return
     const a = result.assets[0]
     try {
@@ -680,11 +841,66 @@ export default function SessionScreen() {
     }
   }
 
-  // In inverted mode, offset 0 = bottom. Show scroll button when scrolled away from bottom.
-  const handleScroll = useCallback((event: any) => {
-    const { contentOffset } = event.nativeEvent
-    setShowScrollButton(contentOffset.y > 200)
-  }, [])
+  // In inverted mode, offset 0 = bottom (newest message). Track the live
+  // offset in a ref as well as state: the auto-scroll effect above needs the
+  // current position without taking `offsetY` as a dependency, which would
+  // re-run it on every scroll frame.
+  const scrollOffsetRef = useRef(0)
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, layoutMeasurement } = event.nativeEvent
+      scrollOffsetRef.current = contentOffset.y
+      nav.observe(contentOffset.y, layoutMeasurement.height)
+      // The strip and auto-follow share one threshold
+      // (AT_BOTTOM_THRESHOLD_PX inside shouldShowScrollButton) — the strip
+      // appears exactly when auto-follow stops, no drift between the two.
+      setShowScrollButton(shouldShowScrollButton(contentOffset.y))
+      setCurrentNavIndex((prev) => {
+        const next = nav.current()
+        return prev === next ? prev : next
+      })
+    },
+    [nav],
+  )
+
+  const moveMessage = (direction: 1 | -1) => {
+    // Previous at the oldest loaded message with older pages still on the
+    // server: load the next batch instead of going nowhere, then advance
+    // into it when it lands (see the effect below). handleLoadMore owns the
+    // loadingTriggered guard, so a tap can't double-load.
+    if (direction === 1 && nav.ids.length > 0 && nav.current() === nav.ids.length - 1 && hasMore) {
+      pendingNavLoad.current = true
+      handleLoadMore()
+      return
+    }
+    if (nav.move(direction) === undefined) return
+    navAttempts.current = 0
+    setCurrentNavIndex(nav.current())
+    seekMessage()
+  }
+
+  // Previous tapped at the oldest loaded message while older pages exist:
+  // the batch has landed — advance into it, unless the user scrolled
+  // manually while it loaded (onScrollBeginDrag clears the flag, so the
+  // tap's target is stale and no jump happens).
+  useEffect(() => {
+    if (!pendingNavLoad.current || loadingMore) return
+    pendingNavLoad.current = false
+    if (nav.move(1) === undefined) return
+    navAttempts.current = 0
+    setCurrentNavIndex(nav.current())
+    seekMessage()
+  }, [messageData, loadingMore, nav, seekMessage])
+
+  // Content changed (streaming append, batch landed, revert): re-derive the
+  // current message from the same id, so the counter stays anchored while
+  // the list shifts underneath it.
+  useEffect(() => {
+    setCurrentNavIndex((prev) => {
+      const next = nav.current()
+      return prev === next ? prev : next
+    })
+  }, [messageData, nav])
 
   // Debounce: onEndReached can fire multiple times during a single scroll gesture
   const loadingTriggered = useRef(false)
@@ -776,6 +992,13 @@ export default function SessionScreen() {
     }
   }
 
+  // Copy helper for the error banners (#214 AF-4): copy the full error
+  // text to the clipboard and confirm with a toast.
+  const copyTextWithToast = useCallback(async (text: string) => {
+    await Clipboard.setStringAsync(text)
+    if (Platform.OS === "android") ToastAndroid.show(t("session.actions.copied"), ToastAndroid.SHORT)
+  }, [t])
+
   const handleModelSelect = useCallback(
     (providerID: string, modelID: string) => {
       setModel({ providerID, modelID })
@@ -816,34 +1039,59 @@ export default function SessionScreen() {
     return found?.variants
   }, [model, providers])
 
+  // Docked navigation strip (#214) — derived state for the strip below.
+  // nav.ids is newest-first (messageData order); N counts from the oldest,
+  // so N = total - index. The strip shows only when scrolled past the
+  // auto-follow threshold with more than one message to walk between —
+  // a single-message session never shows it.
+  const navTotal = navigableIds.length
+  const navIndex = currentNavIndex >= 0 ? currentNavIndex : nav.current()
+  const navCurrent = navIndex >= 0 ? navTotal - navIndex : 1
+  const prevDisabled = navIndex < 0 || (navIndex >= navTotal - 1 && !hasMore)
+  const nextDisabled = navIndex <= 0
+  const prevLoading = loadingMore && navIndex >= navTotal - 1 && navIndex >= 0
+  const navStripVisible = !isLoading && showScrollButton && navTotal > 1
+  const compactNav = windowWidth < 360
+  // Full text for the reconnect banner's Copy action: attempt line + last
+  // error line, exactly what the banner shows.
+  const reconnectCopyText = lastDisconnectReason
+    ? `${t("session.banners.reconnecting", { attempt: reconnectAttempts })}\n${t("session.banners.lastError", { error: lastDisconnectReason })}`
+    : t("session.banners.reconnecting", { attempt: reconnectAttempts })
+
+  const navigation = useNavigation()
+
+  // Header options are set via effect, not inline <Stack.Screen>: this screen
+  // re-renders on every streamed message, and inline options pushed a native
+  // header-config update each render — the trigger for the react-native-screens
+  // "child already has a parent" crash (Sentry OPENCODE-MOBILE-6/-7).
+  useEffect(() => {
+    navigation.setOptions({
+      title: currentSession?.title || t("session.titleFallback"),
+      headerRight: () => (
+        <View style={s.headerRight}>
+          {shortDir && (
+            <View style={[s.dirBadge, isDark && s.dirBadgeDark]}>
+              <Ionicons name="folder-outline" size={14} color={isDark ? "#888888" : "#666666"} />
+              <Text style={[s.dirText, isDark && s.dirTextDark]}>{shortDir}</Text>
+            </View>
+          )}
+          <TouchableOpacity onPress={handleNewSession} hitSlop={8} testID="new-session-button">
+            <Ionicons name="add" size={24} color={isDark ? "#888888" : "#666666"} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowInfo((v) => !v)} hitSlop={8}>
+            <Ionicons
+              name={showInfo ? "stats-chart" : "stats-chart-outline"}
+              size={20}
+              color={showInfo ? "#3b82f6" : isDark ? "#888888" : "#666666"}
+            />
+          </TouchableOpacity>
+        </View>
+      ),
+    })
+  }, [navigation, currentSession?.title, shortDir, showInfo, isDark, t, handleNewSession])
+
   return (
     <>
-      <Stack.Screen
-        options={{
-          title: currentSession?.title || t("session.titleFallback"),
-          headerRight: () => (
-            <View style={s.headerRight}>
-              {shortDir && (
-                <View style={[s.dirBadge, isDark && s.dirBadgeDark]}>
-                  <Ionicons name="folder-outline" size={14} color={isDark ? "#888888" : "#666666"} />
-                  <Text style={[s.dirText, isDark && s.dirTextDark]}>{shortDir}</Text>
-                </View>
-              )}
-              <TouchableOpacity onPress={handleNewSession} hitSlop={8} testID="new-session-button">
-                <Ionicons name="add" size={24} color={isDark ? "#888888" : "#666666"} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowInfo((v) => !v)} hitSlop={8}>
-                <Ionicons
-                  name={showInfo ? "stats-chart" : "stats-chart-outline"}
-                  size={20}
-                  color={showInfo ? "#3b82f6" : isDark ? "#888888" : "#666666"}
-                />
-              </TouchableOpacity>
-            </View>
-          ),
-        }}
-      />
-
       <KeyboardAvoidingView
         style={[s.container, isDark && s.containerDark]}
         // "padding" pushes the composer/toolbar above the keyboard. On Android
@@ -868,6 +1116,8 @@ export default function SessionScreen() {
             if (hasMore && !loadingMore) loadOlderMessages()
           }}
           onScrollToTop={() => {
+            nav.manual()
+            if (navRetry.current) clearTimeout(navRetry.current)
             flatListRef.current?.scrollToEnd({ animated: true })
           }}
           onClose={() => setShowInfo(false)}
@@ -890,19 +1140,41 @@ export default function SessionScreen() {
             cleared by the next send. */}
         {error && (
           <View style={[s.banner, s.bannerError]}>
-            <Text style={[s.bannerText, s.bannerErrorText]} numberOfLines={3}>
-              {error}
-            </Text>
-            <TouchableOpacity onPress={() => useSessions.setState({ error: null })} hitSlop={8}>
-              <Text style={s.bannerErrorAction}>{t("session.banners.dismiss")}</Text>
-            </TouchableOpacity>
+            <Text style={s.bannerText}>{error}</Text>
+            <View style={s.bannerErrorRow}>
+              <Text style={[s.bannerText, s.bannerErrorNext]}>{t("session.banners.errorNextAction")}</Text>
+              <View style={s.bannerErrorActions}>
+                <TouchableOpacity onPress={() => copyTextWithToast(error)} hitSlop={8}>
+                  <Text style={s.bannerErrorAction}>{t("session.actions.copy")}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => useSessions.setState({ error: null })} hitSlop={8}>
+                  <Text style={s.bannerErrorAction}>{t("session.banners.dismiss")}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         )}
 
         {/* SSE reconnect/connected banner */}
         {reconnectAttempts > 0 && (
-          <View style={[s.banner, s.bannerReconnecting]}>
-            <Text style={s.bannerText}>{t("session.banners.reconnecting", { attempt: reconnectAttempts })}</Text>
+          <View style={[s.banner, s.bannerReconnecting, s.bannerRow]}>
+            <View style={s.bannerTextCol}>
+              <Text style={s.bannerText}>{t("session.banners.reconnecting", { attempt: reconnectAttempts })}</Text>
+              {lastDisconnectReason && (
+                <Text style={[s.bannerText, s.bannerSubText]} numberOfLines={2}>
+                  {t("session.banners.lastError", { error: lastDisconnectReason })}
+                </Text>
+              )}
+            </View>
+            <TouchableOpacity
+              style={s.bannerCopyPill}
+              onPress={() => copyTextWithToast(reconnectCopyText)}
+              accessibilityRole="button"
+              accessibilityLabel={t("session.actions.copy")}
+              hitSlop={8}
+            >
+              <Text style={s.bannerCopyText}>{t("session.actions.copy")}</Text>
+            </TouchableOpacity>
           </View>
         )}
         {showConnectedFlash && reconnectAttempts === 0 && (
@@ -932,6 +1204,11 @@ export default function SessionScreen() {
           </View>
         )}
 
+        {/* Subagent children (#187) — above the message list, outside the
+            FlatList. Read-only; a load failure shows its own error + retry
+            and never blocks the transcript. */}
+        {id ? <SubagentSection parentId={id} isDark={isDark} /> : null}
+
         {isLoading ? (
           <View style={s.loading}>
             <ActivityIndicator size="large" color={isDark ? "#ffffff" : "#0a0a0a"} />
@@ -942,6 +1219,23 @@ export default function SessionScreen() {
               ref={flatListRef}
               data={messageData}
               inverted
+              CellRendererComponent={MessageCell}
+              onLayout={(event) => {
+                nav.observe(nav.offset, event.nativeEvent.layout.height)
+              }}
+              onScrollBeginDrag={() => {
+                // The user took over: drop any pending seek/advance and
+                // re-anchor from the viewport from here on.
+                pendingNavLoad.current = false
+                nav.manual()
+                if (navRetry.current) clearTimeout(navRetry.current)
+              }}
+              onScrollToIndexFailed={({ index, averageItemLength }) => {
+                // Estimated jump toward the target so its rows mount; the
+                // seek retry loop (seekMessage) settles on the real frame
+                // once the target renders.
+                flatListRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: false })
+              }}
               keyExtractor={(item) => item.message.id}
               renderItem={renderMessage}
               contentContainerStyle={s.messageList}
@@ -984,6 +1278,79 @@ export default function SessionScreen() {
               </TouchableOpacity>
             )}
           </Animated.View>
+        )}
+
+        {/* Message navigation strip (#214) — one in-flow row below the
+            list, above StatusIndicator. It can never cover message text:
+            in-flow layout has no overlap by construction. Strip taps are
+            plain button presses: they never blur the composer or dismiss
+            the keyboard. Below 360dp Previous/Next collapse to icon-only;
+            the counter and Latest keep their labels. */}
+        {navStripVisible && (
+          <View style={[s.navStrip, isDark && s.navStripDark]}>
+            <TouchableOpacity
+              style={[s.navPill, isDark && s.navPillDark, prevDisabled && s.navPillDisabled]}
+              onPress={() => moveMessage(1)}
+              disabled={prevDisabled}
+              accessibilityRole="button"
+              accessibilityLabel={t("session.nav.previousLabel")}
+              accessibilityState={{ disabled: prevDisabled }}
+              testID="nav-previous"
+            >
+              {prevLoading ? (
+                <ActivityIndicator size="small" color={isDark ? "#888888" : "#666666"} />
+              ) : (
+                <>
+                  <Ionicons name="chevron-up" size={18} color={isDark ? "#ffffff" : "#0a0a0a"} />
+                  {!compactNav && (
+                    <Text style={[s.navPillText, isDark && s.navPillTextDark]}>{t("session.nav.previous")}</Text>
+                  )}
+                </>
+              )}
+            </TouchableOpacity>
+            <Text
+              style={[s.navCounter, isDark && s.navCounterDark]}
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel={t("session.nav.counterLabel", { current: navCurrent, total: navTotal })}
+            >
+              {t("session.nav.counter", { current: navCurrent, total: `${navTotal}${hasMore ? "+" : ""}` })}
+            </Text>
+            <TouchableOpacity
+              style={[s.navPill, isDark && s.navPillDark, nextDisabled && s.navPillDisabled]}
+              onPress={() => moveMessage(-1)}
+              disabled={nextDisabled}
+              accessibilityRole="button"
+              accessibilityLabel={t("session.nav.nextLabel")}
+              accessibilityState={{ disabled: nextDisabled }}
+              testID="nav-next"
+            >
+              {!compactNav && (
+                <Text style={[s.navPillText, isDark && s.navPillTextDark]}>{t("session.nav.next")}</Text>
+              )}
+              <Ionicons name="chevron-down" size={18} color={isDark ? "#ffffff" : "#0a0a0a"} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.navPill, s.navLatest, isDark && s.navLatestDark]}
+              onPress={() => scrollToBottom(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t("session.nav.latestLabel")}
+              testID="nav-latest"
+            >
+              <View style={s.navDoubleCaret}>
+                <Ionicons
+                  name="chevron-down"
+                  size={14}
+                  style={{ marginBottom: -7 }}
+                  color={isDark ? "#0a0a0a" : "#ffffff"}
+                />
+                <Ionicons name="chevron-down" size={14} color={isDark ? "#0a0a0a" : "#ffffff"} />
+              </View>
+              <Text style={[s.navPillText, s.navLatestText, isDark && s.navLatestTextDark]}>
+                {t("session.nav.latest")}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Status */}
@@ -1097,7 +1464,7 @@ export default function SessionScreen() {
 
             <TextInput
               ref={chatInputRef}
-              style={[s.input, isDark && s.inputDark, speech.listening && s.inputListening]}
+              style={[s.input, isDark && s.inputDark, speech.listening && s.inputListening, { maxHeight: inputMaxHeight }]}
               placeholder={
                 speech.listening
                   ? t("session.input.placeholderListening")
@@ -1117,6 +1484,7 @@ export default function SessionScreen() {
               }
               editable={!speech.listening}
               multiline
+              scrollEnabled
               maxLength={10000}
               testID="chat-message-input"
             />
@@ -1191,11 +1559,6 @@ const s = StyleSheet.create({
   containerDark: { backgroundColor: "#0a0a0a" },
   loading: { flex: 1, justifyContent: "center", alignItems: "center" },
   listWrap: { flex: 1, position: "relative" },
-
-  // Messages
-  messageList: { padding: 16, paddingBottom: 8 },
-
-  // Scroll button
   scrollBtn: {
     position: "absolute",
     bottom: 16,
@@ -1213,6 +1576,49 @@ const s = StyleSheet.create({
     elevation: 4,
   },
   scrollBtnDark: { backgroundColor: "#2a2a2a" },
+
+  // Messages
+  messageList: { padding: 16, paddingBottom: 8 },
+
+  // Message navigation strip (#214) — docked in-flow row below the list.
+  // In-flow by construction: it can never overlap message text, which is
+  // the defect that killed the floating controls in PR #215.
+  navStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    height: 56,
+    paddingHorizontal: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e5e5",
+    backgroundColor: "#ffffff",
+  },
+  navStripDark: { borderTopColor: "#1a1a1a", backgroundColor: "#0a0a0a" },
+  navPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#d4d4d4",
+    borderRadius: 22,
+  },
+  navPillDark: { borderColor: "#404040" },
+  navPillDisabled: { opacity: 0.45 },
+  navPillText: { fontSize: 14, fontWeight: "600", color: "#0a0a0a" },
+  navPillTextDark: { color: "#ffffff" },
+  navCounter: { fontSize: 14, fontWeight: "700", color: "#666666" },
+  navCounterDark: { color: "#888888" },
+  navLatest: { backgroundColor: "#0a0a0a", borderColor: "#0a0a0a" },
+  navLatestDark: { backgroundColor: "#ffffff", borderColor: "#ffffff" },
+  navLatestText: { color: "#ffffff" },
+  navLatestTextDark: { color: "#0a0a0a" },
+  // Two stacked chevrons form the double-down Latest caret.
+  navDoubleCaret: { flexDirection: "column", alignItems: "center" },
 
   // Loading more (appears at top in inverted list = ListFooterComponent)
   loadingMore: {
@@ -1397,17 +1803,35 @@ const s = StyleSheet.create({
   bannerReconnecting: { backgroundColor: "#92400e" },
   bannerConnected: { backgroundColor: "#065f46" },
   bannerText: { color: "#ffffff", fontSize: 13, fontWeight: "500" },
+  // Reconnect banner with last-error line + Copy (#214 AF-4): text column
+  // left, Copy pill top-right.
+  bannerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  bannerTextCol: { flex: 1 },
+  bannerSubText: { fontSize: 12, color: "#fde68a" },
+  bannerCopyPill: {
+    backgroundColor: "#fff7ed",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  bannerCopyText: { color: "#92400e", fontSize: 13, fontWeight: "700" },
 
   // Session error banner (agent run failed)
   bannerError: {
     backgroundColor: "#991b1b",
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 4,
+  },
+  bannerErrorRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 12,
   },
+  bannerErrorNext: { flex: 1, color: "#fecaca", fontSize: 12 },
+  bannerErrorActions: { flexDirection: "row", gap: 16 },
   bannerErrorAction: { color: "#fecaca", fontSize: 13, fontWeight: "700" },
-  bannerErrorText: { flex: 1 },
 
   // Pending revert (edit message) banner
   bannerRevert: {

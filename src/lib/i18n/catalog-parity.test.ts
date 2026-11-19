@@ -1,11 +1,13 @@
-// Guards against locale drift: en.json and zh-Hans.json must expose exactly
-// the same set of translation keys, or i18next silently falls back to the
-// key path (en) / nothing sensible (missing zh copy) at runtime. Run with
-// plain `node --test` — no i18next/expo-localization imports needed, same
-// as locale-resolve.test.ts.
+// Guards against locale drift. This fork ships English + Simplified Chinese
+// and keeps those two catalogs in lockstep (missing copy silently falls back
+// to the key path at runtime). ru.json is carried from upstream as a
+// best-effort fallback catalog and is deliberately not held to strict parity.
+// Run with plain `node --test` — no i18next/expo-localization imports needed,
+// same as locale-resolve.test.ts.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import en from "./en.json" with { type: "json" }
+import ru from "./ru.json" with { type: "json" }
 import zhHans from "./zh-Hans.json" with { type: "json" }
 
 // Flattens a nested translation object into dotted leaf-key paths, e.g.
@@ -36,7 +38,7 @@ test("en.json and zh-Hans.json expose identical translation keys", () => {
 })
 
 test("no translation value is an empty string", () => {
-  for (const [name, catalog] of [["en", en], ["zh-Hans", zhHans]] as const) {
+  for (const [name, catalog] of [["en", en], ["ru", ru], ["zh-Hans", zhHans]] as const) {
     const keys = flattenKeys(catalog)
     for (const key of keys) {
       const value = key.split(".").reduce<unknown>((acc, part) => (acc as Record<string, unknown>)?.[part], catalog)

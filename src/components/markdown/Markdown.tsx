@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { View, Text, useColorScheme, Platform, type StyleProp, type ViewStyle, type TextStyle } from "react-native"
+import { View, Text, useColorScheme, Platform, type ImageStyle, type StyleProp, type ViewStyle, type TextStyle } from "react-native"
 import { useMarkdown, Renderer } from "react-native-marked"
 import { CodeBlock } from "./CodeBlock"
+import { MarkdownImage } from "./MarkdownImage"
 
 // react-native-marked's base Renderer hardcodes `selectable` on every plain
 // text node it produces (text/strong/em/del/heading/codespan). On Android,
@@ -14,7 +15,26 @@ import { CodeBlock } from "./CodeBlock"
 // own FlatList (app/session/[id].tsx), so every markdown text node hits
 // this. Code content is still copyable via CodeBlock's explicit Copy
 // button, so dropping `selectable` on plain text costs little.
-class CustomRenderer extends Renderer {
+// Exported so the key generation can be driven directly (repro/verification
+// harness, issue #255) without rendering the component.
+export class CustomRenderer extends Renderer {
+  // Base Renderer generates every React key via github-slugger, slugging the
+  // same constant string ("react-native-marked-ele") on every call — one new
+  // property on the slugger's `occurrences` object per rendered node in a
+  // single parse. Past 196,607 nodes Hermes throws RangeError "Property
+  // storage exceeds 196607 properties" (issue #255, Sentry
+  // OPENCODE-MOBILE-Q). Keys only need to be unique within a parse, so use
+  // a cheap counter instead: no per-node storage, no limit to hit. Every
+  // base method (list/link/image/table/code/paragraph/...) calls
+  // `this.getKey()`, so this one override covers all of them. The renderer
+  // is created fresh per `children` value (below), so the counter restarts
+  // per parse and keys stay stable for a given value.
+  private keyCounter = 0
+
+  getKey(): string {
+    return `markdown-key-${this.keyCounter++}`
+  }
+
   private plainText(children: string | ReactNode[], styles?: StyleProp<TextStyle>): ReactNode {
     return (
       <Text key={this.getKey()} style={styles}>
@@ -53,6 +73,18 @@ class CustomRenderer extends Renderer {
 
   codespan(text: string, styles?: TextStyle): ReactNode {
     return this.plainText(text, [styles, { fontStyle: "normal", fontWeight: "normal" }])
+  }
+
+  image(uri: string, alt?: string, style?: ImageStyle, title?: string): ReactNode {
+    // .svg keeps the library's MDSvg — its fetch effect is already scoped
+    // to [uri], so it does not loop.
+    if (uri.endsWith(".svg")) return super.image(uri, alt, style, title)
+    // Non-SVG images must NOT use the library's MDImage: its size-fetch
+    // effect has no dependency array, so it refetches and setStates after
+    // every render — an unbounded re-render loop that trips React's
+    // "Maximum update depth exceeded" guard (issue #262, Sentry S/T).
+    // MarkdownImage is the same rendering with the fetch scoped to [uri].
+    return <MarkdownImage key={this.getKey()} uri={uri} alt={alt || title} style={style} />
   }
 }
 

@@ -111,6 +111,28 @@ async function resolveApi(
   }
 }
 
+// Fetch /project/current + /path AFTER the client is published to the store,
+// so the SSE stream (which keys off `client` appearing) is not serialized
+// behind two metadata requests it doesn't need (#189). `isCurrent` guards
+// against a stale response clobbering state after a server switch mid-fetch:
+// the metadata only lands if this client is still the active one.
+async function fetchMetadataBehind(
+  client: Client,
+  isCurrent: () => boolean,
+  apply: (project: Project | null, home: string | null) => void,
+): Promise<void> {
+  try {
+    const [proj, paths] = await Promise.all([
+      client.project.current().catch(() => null),
+      client.path.get().catch(() => null),
+    ])
+    if (!isCurrent()) return
+    apply(proj, paths?.home ?? null)
+  } catch {
+    // Server might be offline — metadata stays null, the client still works.
+  }
+}
+
 export const useConnections = create<ConnectionsState>((set, get) => ({
   connections: [],
   activeConnection: null,
@@ -221,11 +243,13 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       // Create client for active connection
       let client: Client | null = null
       let base: ClientBase | null = null
-      let project: Project | null = null
-      let home: string | null = null
       if (active) {
         const password = await SecureStore.getItemAsync(`${PASSWORDS_PREFIX}${active.id}`)
         const auth = buildAuth(active.username, password)
+        // resolveBaseUrl() maps a Tailscale connection to its local forwarder
+        // URL (no-op for direct URLs). The resolveApi() probe stays BEFORE
+        // the publish: it chooses which client to build, so #189's split
+        // starts after the client exists.
         const baseUrl = await resolveBaseUrl(active)
         const { api, resolved } = await resolveApi(active, auth, baseUrl)
         const built = buildClient(baseUrl, active.directory, auth, api)
@@ -234,30 +258,30 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
         // Persist a probe that was only just discovered, so the next launch
         // picks the same transport without probing again.
         if (resolved) await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
-        // Fetch current project info and server paths
-        try {
-          const [proj, paths] = await Promise.all([
-            client.project.current().catch(() => null),
-            client.path.get().catch(() => null),
-          ])
-          project = proj
-          home = paths?.home || null
-        } catch {
-          // Server might be offline
-        }
       }
 
+      // Publish the client immediately — the SSE stream starts off this, and
+      // must not wait on the metadata fetches below (#189).
       set({
         connections,
         activeConnection: active,
         client,
         clientBase: base,
-        currentProject: project,
-        serverHome: home,
+        currentProject: null,
+        serverHome: null,
         recentDirectories,
         isLoading: false,
         tailscaleConnecting: false,
       })
+
+      // Metadata fills in behind the publish, guarded so a stale response
+      // can't clobber state after a server switch mid-fetch.
+      if (active && client) {
+        const requestClient = client
+        void fetchMetadataBehind(requestClient, () => get().client === requestClient, (proj, home) =>
+          set({ currentProject: proj, serverHome: home }),
+        )
+      }
     } catch (error) {
       set({ error: "errors.loadConnections", isLoading: false, tailscaleConnecting: false })
     }
@@ -436,6 +460,12 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       serverHome: home,
       tailscaleConnecting: false,
     })
+    if (active && client) {
+      const requestClient = client
+      void fetchMetadataBehind(requestClient, () => get().client === requestClient, (proj, home) => {
+        set({ currentProject: proj, serverHome: home })
+      })
+    }
   },
 
   testConnection: async (connection, password) => {

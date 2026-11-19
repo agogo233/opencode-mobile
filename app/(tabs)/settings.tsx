@@ -119,6 +119,7 @@ export default function SettingsScreen() {
     system: t("settings.language.system"),
     en: t("settings.language.en"),
     "zh-Hans": t("settings.language.zhHans"),
+    ru: t("settings.language.ru"),
   }
 
   const handleLanguagePress = useCallback(() => {
@@ -126,6 +127,7 @@ export default function SettingsScreen() {
       { text: localeLabels.system, onPress: () => setLocale("system") },
       { text: localeLabels.en, onPress: () => setLocale("en") },
       { text: localeLabels["zh-Hans"], onPress: () => setLocale("zh-Hans") },
+      { text: localeLabels.ru, onPress: () => setLocale("ru") },
       { text: t("common.cancel"), style: "cancel" },
     ])
   }, [t, setLocale, localeLabels])

@@ -1,8 +1,14 @@
 name: Publish to Google Play Store
 
 on:
-  release:
-    types: [published]
+  # Issue #227 (design §2): the `release: published` trigger is RETIRED.
+  # Post-change entry paths are tag push and workflow_dispatch only.
+  # build.yml already creates the GitHub release from the tag, and no
+  # release path depends on the retired trigger (the sentry-fix loop
+  # releases via tag push).
+  # NOTE (2026-11-14): the cua-mid-stream gate job that used to sit below
+  # was REMOVED (triage verdict: STALE gate, publish run 43572233118).
+  # Revival recipe lives in the removal PR body.
   push:
     tags: ["v*"]
   workflow_dispatch:
@@ -18,23 +24,46 @@ on:
           - beta
           - production
       status:
-        description: "Release status (draft = uploads without going live/review; completed = submit)"
+        description: "Release status (draft = uploads without going live/review; completed = submit; inProgress/halted = staged rollout at user_fraction)"
         required: false
         default: "completed"
         type: choice
         options:
           - completed
           - draft
+          - inProgress
+          - halted
+      user_fraction:
+        description: "Staged-rollout user fraction (0.0-1.0, exclusive). Used only when status is inProgress or halted; empty otherwise."
+        required: false
+        default: "0.20"
+        type: string
 
-# A tag push and a `release: published` for the same version must not race two
-# uploads into the same track. Serialize per ref instead of cancelling, because
-# cancelling mid-upload can leave a half-created Play release.
+# Issue #230 (design §3, N3): the tag-path Record step PATCHes the GitHub
+# release body with the rollout fraction/versionCode/status. That is the
+# only write this workflow's GITHUB_TOKEN performs.
+permissions:
+  contents: write
+
+# Concurrent runs for the same ref must not race two uploads into the same
+# track. Serialize per ref instead of cancelling, because cancelling
+# mid-upload can leave a half-created Play release.
 concurrency:
   group: publish-play-store-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  # NOTE (2026-11-14): the cua-mid-stream gate job (Issue #227) was
+  # REMOVED from this workflow — triage verdict STALE gate, publish run
+  # 43572233118 (gate failed while `publish` succeeded; gate never
+  # passed; sampler reads the opencode server API, not the app).
+  # scripts/android-cua-smoke.py is kept for local runs. Revival recipe
+  # lives in the removal PR body.
+
   publish:
+    # NOTE (2026-11-14): the cua-mid-stream gate job was removed from
+    # this workflow (triage verdict STALE gate, run 43572233118); publish
+    # never depended on it — no `needs:` was ever wired.
     runs-on: ubuntu-latest
     env:
       EXPO_PUBLIC_SENTRY_DSN: ${{ secrets.EXPO_PUBLIC_SENTRY_DSN }}
@@ -100,13 +129,23 @@ jobs:
         # (`opencode-mobile@${app.json version}`, see src/lib/sentry.ts). That
         # mismatch made every uploaded source map land under a release Sentry
         # never looks up, so symbolication silently failed. Pin the Gradle-side
-        # values to exactly what the app reports. (Only expo.version matters
-        # here, not the android.versionCode bumped above.)
+        # values to exactly what the app reports.
+        # Dist (issue #269) is <expo.version>+<expo.android.versionCode>, the
+        # same formula the runtime builds in src/lib/sentry-dist.ts from the
+        # same app.json — so one release+dist identifies exactly one build.
+        # The "Bump android.versionCode" step above runs first, so CODE here
+        # is the Play code (run_number+100), not the repo code.
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./app.json').expo.version")
+          CODE=$(node -p "require('./app.json').expo.android.versionCode")
+          if [ -z "$CODE" ] || [ "$CODE" = "undefined" ]; then
+            echo "::error::expo.android.versionCode is missing from app.json — cannot derive SENTRY_DIST"
+            exit 1
+          fi
           echo "SENTRY_RELEASE=opencode-mobile@${VERSION}" >> "$GITHUB_ENV"
-          echo "SENTRY_DIST=${VERSION}" >> "$GITHUB_ENV"
-          echo "Sentry release=opencode-mobile@${VERSION} dist=${VERSION}"
+          echo "SENTRY_DIST=${VERSION}+${CODE}" >> "$GITHUB_ENV"
+          echo "Sentry release=opencode-mobile@${VERSION} dist=${VERSION}+${CODE}"
 
       - name: Purge stale generated sources
         # The Android build cache (restore-keys prefix fallback) can restore a
@@ -145,7 +184,242 @@ jobs:
         # until the monthly reset.
         # Grep the shipped Hermes bundle instead. Verified to discriminate:
         # v0.4.14 passes, pre-gate v0.4.13 fails.
-        run: node scripts/verify-release-bundle.mjs android/app/build/outputs/bundle/release/app-release.aab
+        # Issue #232: the second argument cross-checks the shipped bundle's
+        # `sentry-dbid-<uuid>` marker against the Debug ID of the built
+        # release source map (path per @react-native/gradle-plugin:
+        # generated/sourcemaps/react/<variant>/index.android.bundle.map).
+        # Issue #265: persist the just-built debug id for the server-side
+        # identity check below ("Verify Sentry artifacts for release").
+        # verify-release-bundle.mjs already prints
+        # `debug id: bundle <id>, source map <id>` for the AAB+map (and
+        # exits non-zero if the two disagree), so capture its output and
+        # extract the bundle id into $GITHUB_ENV as BUILT_DEBUG_ID. A
+        # missing/unparsable id fails the step — never let a publish run
+        # continue to the verify step with no built id to check against.
+        run: |
+          set -euo pipefail
+          OUTPUT="$(node scripts/verify-release-bundle.mjs android/app/build/outputs/bundle/release/app-release.aab android/app/build/generated/sourcemaps/react/release/index.android.bundle.map)"
+          echo "$OUTPUT"
+          BUILT_DEBUG_ID="$(printf '%s\n' "$OUTPUT" | sed -nE 's/^debug id: bundle ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}), source map .*/\1/p')"
+          if [ -z "$BUILT_DEBUG_ID" ]; then
+            echo "::error::could not extract the built bundle debug id from verify-release-bundle.mjs output"
+            exit 1
+          fi
+          echo "BUILT_DEBUG_ID=$BUILT_DEBUG_ID" >> "$GITHUB_ENV"
+          echo "Built Sentry debug id: $BUILT_DEBUG_ID"
+
+      - name: Upload native debug symbols to Sentry
+        # Issue #232: nothing ever uploaded the native (.so) debug symbols -
+        # sentry.gradle creates only the JS bundle/source-map upload task, so
+        # Sentry held no debug files for the ELF build IDs in the AAB and
+        # true native frames could not be symbolicated. Upload the UNSTRIPPED
+        # libs from the release build's merged_native_libs intermediates
+        # (association is by ELF build ID, so this is dist-independent and
+        # unaffected by the versionName/versionCode dist split). The stripped
+        # and symbol-table intermediates are only fallbacks if a future AGP
+        # moves the merged output. Plain step on purpose: missing libs,
+        # missing CLI or an upload error all fail the job.
+        run: |
+          set -euo pipefail
+          SENTRY_CLI=node_modules/@sentry/cli/bin/sentry-cli
+          if [ ! -x "$SENTRY_CLI" ]; then
+            echo "::error::bundled sentry-cli not found at $SENTRY_CLI"
+            exit 1
+          fi
+          "$SENTRY_CLI" --version
+          LIBS=""
+          for candidate in \
+            android/app/build/intermediates/merged_native_libs/release \
+            android/app/build/intermediates/stripped_native_libs/release \
+            android/app/build/intermediates/native_symbol_tables/release; do
+            if [ -d "$candidate" ] && [ -n "$(find "$candidate" \( -name '*.so' -o -name '*.sym' \) -print -quit)" ]; then
+              LIBS="$candidate"
+              break
+            fi
+          done
+          if [ -z "$LIBS" ]; then
+            echo "::error::no native libs found in any release intermediates directory - nothing to upload"
+            exit 1
+          fi
+          echo "Uploading native debug symbols from $LIBS ($(find "$LIBS" -name '*.so' | wc -l) .so files)"
+          "$SENTRY_CLI" debug-files upload \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            "$LIBS"
+
+      - name: Verify Sentry artifacts for release
+        # Issue #232: prove server-side that this release's artifacts exist,
+        # so a skipped or silently failed upload can no longer ship green.
+        # (i) JS bundle + source map, via the artifact-bundle API. WHY NOT
+        # `sentry-cli releases files list` (PR #233): the Gradle upload runs
+        # `sentry-cli react-native gradle`, which only uploads an artifact
+        # bundle with a weak release/dist association — sentry-cli 2.53.0
+        # source (src/commands/react_native/gradle.rs) contains NO release
+        # creation, and Sentry docs state creating a release is "no longer
+        # required" with Debug IDs. No Release object exists, so the legacy
+        # release-files endpoint 404s ("Release not found", publish run
+        # 43565249322). Creating the release first was NOT used: the
+        # artifact index that endpoint reads is keyed by the Release object
+        # and written at upload time, so nothing proves the bundle's files
+        # become listable after a late `releases new`. Instead query the
+        # artifact-bundle endpoints directly (the same endpoints Sentry's
+        # own web UI uses for Project Settings > Source Maps > Artifact
+        # Bundles; getsentry/sentry src/sentry/api/endpoints/
+        # artifact_bundles.py + project_artifact_bundle_files.py): list
+        # bundles by release, then list the matched bundle's files and
+        # require ~/index.android.bundle + ~/index.android.bundle.map with
+        # one shared non-empty debug id — that shared id is what makes
+        # symbolication work. (ii) Native debug files: sentry-cli 2.53.0 has
+        # NO server-side debug-files list (its debug-files subcommands are
+        # bundle-sources/check/find/print-sources/upload, and `find` is
+        # local-only), so query the Sentry API's project debug-files (dsyms)
+        # endpoint with the same SENTRY_AUTH_TOKEN; a non-200 response or an
+        # empty list fails the job. No continue-on-error on purpose.
+        # Issue #265: the (i) check below is an IDENTITY check, not an
+        # existence check. A tag push triggers three workflows (Play AAB
+        # here, CI APK in build.yml, F-Droid APK in publish-fdroid.yml)
+        # that used to upload a bundle under the SAME release+dist, each with
+        # a different debug id — so "first bundle for this release+dist"
+        # used to match a sibling build and pass (0.4.22: built 95a40809,
+        # verify matched the F-Droid bundle's 656f154e and passed). Issue
+        # #269 gives each build its own dist (<version>+<versionCode>), so
+        # the three builds no longer collide: more than one match now means
+        # a re-run of this workflow or a stale bundle, not a sibling build.
+        # The step still requires a matched bundle's shared debug id to equal
+        # $BUILT_DEBUG_ID (persisted above from the just-built AAB+map),
+        # and checks EVERY bundle matching release+dist instead of taking
+        # the first. More than one match only warns: a re-run legitimately
+        # re-uploads under the same release+dist, so failing on count alone
+        # would fail every re-run by design — the debug-id match is the
+        # gate. NOTE: this fix alone does NOT restore symbolication.
+        # Uploaded bundles since 0.4.16 do not survive in Sentry (the
+        # vanishing mechanism is still unidentified, issue #265), so this
+        # step will correctly FAIL publishes until that is resolved.
+        run: |
+          set -euo pipefail
+          echo "Verifying Sentry artifacts for release $SENTRY_RELEASE (dist $SENTRY_DIST)"
+          # (i-a) Find the artifact bundle associated with this release+dist.
+          HTTP_CODE="$(curl -sS -o /tmp/sentry-bundles.json -w '%{http_code}' \
+            -G --data-urlencode "query=$SENTRY_RELEASE" --data-urlencode "per_page=100" \
+            -H "Authorization: Bearer ${SENTRY_AUTH_TOKEN}" \
+            "https://sentry.io/api/0/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/files/artifact-bundles/")"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Sentry artifact-bundles API returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+          cat > /tmp/sentry-find-bundle.py <<'PY'
+          import json, os, sys
+          data = json.load(open('/tmp/sentry-bundles.json'))
+          if not isinstance(data, list):
+              print('::error::unexpected artifact-bundles response (not a JSON list)', file=sys.stderr)
+              sys.exit(2)
+          want_release, want_dist = os.environ['SENTRY_RELEASE'], os.environ['SENTRY_DIST']
+          matches = []
+          for bundle in data:  # API sorts newest first
+              for assoc in bundle.get('associations', []):
+                  if assoc.get('release') == want_release and assoc.get('dist') == want_dist:
+                      matches.append(bundle)
+                      break
+          if not matches:
+              print(f'::error::no artifact bundle associated with release {want_release} dist {want_dist}',
+                    file=sys.stderr)
+              sys.exit(1)
+          for bundle in matches:
+              print(f"Matched artifact bundle {bundle['bundleId']} "
+                    f"(fileCount={bundle.get('fileCount')}, date={bundle.get('date')})",
+                    file=sys.stderr)
+          if len(matches) > 1:
+              # Since issue #269 each build has its own dist, so sibling
+              # workflows no longer collide here — >1 match is a re-run of
+              # this workflow or a stale bundle, not a sibling build. A
+              # count alone still proves nothing, so this warns and the
+              # debug-id check below decides.
+              print(f"::warning::{len(matches)} artifact bundles match release {want_release} "
+                    f"dist {want_dist} — re-run/stale bundles share release+dist; "
+                    "matching on the built debug id, not on order", file=sys.stderr)
+          for bundle in matches:
+              print(bundle['bundleId'])
+          PY
+          MATCHED_BUNDLE_IDS="$(python3 /tmp/sentry-find-bundle.py)"
+          echo "Artifact bundles matching release $SENTRY_RELEASE dist $SENTRY_DIST:"
+          printf '%s\n' "$MATCHED_BUNDLE_IDS" | sed 's/^/  /'
+          # (i-b) Check every matched bundle's files; pass only if one of
+          # them carries the JUST-BUILT debug id (issue #265). A bundle
+          # from a sibling workflow (different debug id) or a malformed
+          # bundle is skipped with a warning — it is not this build, so
+          # it cannot prove this build is symbolicated. An API (non-200)
+          # failure is still a hard failure: an unreadable candidate must
+          # never be skipped silently.
+          if [ -z "${BUILT_DEBUG_ID:-}" ]; then
+            echo "::error::BUILT_DEBUG_ID is empty — the built bundle debug id was not persisted; refusing to verify against an unknown build"
+            exit 1
+          fi
+          echo "Built debug id to match: $BUILT_DEBUG_ID"
+          cat > /tmp/sentry-check-bundle-files.py <<'PY'
+          import json, sys
+          data = json.load(open('/tmp/sentry-bundle-files.json'))
+          files = data.get('files')
+          if not isinstance(files, list):
+              print('unexpected artifact-bundle files response (no files list)', file=sys.stderr)
+              sys.exit(2)
+          by_path = {f.get('filePath'): f for f in files}
+          for path in ('~/index.android.bundle', '~/index.android.bundle.map'):
+              entry = by_path.get(path)
+              if entry is None:
+                  print(f'{path} not present in artifact bundle', file=sys.stderr)
+                  sys.exit(1)
+              print(f"Found {path} (size={entry.get('fileSize')}, "
+                    f"debugId={entry.get('debugId')}, sourcemap={entry.get('sourcemap')})",
+                    file=sys.stderr)
+          bundle_id = by_path['~/index.android.bundle'].get('debugId')
+          map_id = by_path['~/index.android.bundle.map'].get('debugId')
+          if not bundle_id or not map_id:
+              print('bundle or source map is missing its debug id', file=sys.stderr)
+              sys.exit(1)
+          if bundle_id != map_id:
+              print(f'debug id mismatch within bundle: bundle {bundle_id} vs map {map_id}', file=sys.stderr)
+              sys.exit(1)
+          print(bundle_id)
+          PY
+          MATCHED_BUNDLE_ID=""
+          for BUNDLE_ID in $MATCHED_BUNDLE_IDS; do
+            echo "Checking artifact bundle $BUNDLE_ID..."
+            HTTP_CODE="$(curl -sS -o /tmp/sentry-bundle-files.json -w '%{http_code}' \
+              -G --data-urlencode "per_page=100" \
+              -H "Authorization: Bearer ${SENTRY_AUTH_TOKEN}" \
+              "https://sentry.io/api/0/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/artifact-bundles/${BUNDLE_ID}/files/")"
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "::error::Sentry artifact-bundle files API returned HTTP $HTTP_CODE for bundle $BUNDLE_ID"
+              exit 1
+            fi
+            if SHARED_DEBUG_ID="$(python3 /tmp/sentry-check-bundle-files.py)"; then
+              echo "Artifact bundle $BUNDLE_ID: shared debug id $SHARED_DEBUG_ID"
+              if [ "$SHARED_DEBUG_ID" = "$BUILT_DEBUG_ID" ]; then
+                MATCHED_BUNDLE_ID="$BUNDLE_ID"
+                break
+              fi
+              echo "::warning::artifact bundle $BUNDLE_ID carries debug id $SHARED_DEBUG_ID, not the built debug id $BUILT_DEBUG_ID — sibling build, skipping"
+            else
+              echo "::warning::artifact bundle $BUNDLE_ID is not a usable candidate for this release, skipping"
+            fi
+          done
+          if [ -z "$MATCHED_BUNDLE_ID" ]; then
+            echo "::error::no artifact bundle for release $SENTRY_RELEASE dist $SENTRY_DIST carries the built debug id $BUILT_DEBUG_ID — the shipped bundle is not symbolicated (see issue #265)"
+            exit 1
+          fi
+          echo "JS bundle + source map verified: artifact bundle $MATCHED_BUNDLE_ID carries the built debug id $BUILT_DEBUG_ID"
+          HTTP_CODE="$(curl -sS -o /tmp/sentry-dsyms.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${SENTRY_AUTH_TOKEN}" \
+            "https://sentry.io/api/0/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/files/dsyms/")"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Sentry debug-files API returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+          python3 -c "import json,sys; d=json.load(open('/tmp/sentry-dsyms.json')); sys.exit(0 if isinstance(d,list) and len(d)>0 else 1)" || {
+            echo "::error::no native debug files stored for project $SENTRY_PROJECT"
+            exit 1
+          }
+          echo "Sentry artifacts verified for $SENTRY_RELEASE: bundle + source map in artifact bundle $MATCHED_BUNDLE_ID (built debug id $BUILT_DEBUG_ID), native debug files present."
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v7
@@ -167,13 +441,28 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TRACK="${{ github.event.inputs.track || 'internal' }}"
             STATUS="${{ github.event.inputs.status || 'completed' }}"
+            USER_FRACTION_INPUT="${{ github.event.inputs.user_fraction || '0.20' }}"
           else
+            # Issue #230 (design §1): a tag publish is a STAGED rollout —
+            # production at 20% (status inProgress), held over the 3-day
+            # Sentry watch, then completed/halted via play-rollout.yml.
             TRACK=production
-            STATUS=completed
+            STATUS=inProgress
+            USER_FRACTION_INPUT="0.20"
+          fi
+          # Effective fraction (design §1): the pinned upload action REQUIRES
+          # a userFraction for inProgress/halted and REJECTS one for
+          # completed/draft, so the output is set only for the staged
+          # statuses and empty otherwise (empty = unset for the action),
+          # regardless of the user_fraction input's default.
+          USER_FRACTION=""
+          if [ "$STATUS" = "inProgress" ] || [ "$STATUS" = "halted" ]; then
+            USER_FRACTION="$USER_FRACTION_INPUT"
           fi
           echo "track=$TRACK" >> "$GITHUB_OUTPUT"
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-          echo "event=${{ github.event_name }} -> track=$TRACK status=$STATUS"
+          echo "user_fraction=$USER_FRACTION" >> "$GITHUB_OUTPUT"
+          echo "event=${{ github.event_name }} -> track=$TRACK status=$STATUS user_fraction=${USER_FRACTION:-none}"
 
       - name: Publish to Play Store
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
@@ -183,6 +472,7 @@ jobs:
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
           track: ${{ steps.channel.outputs.track }}
           status: ${{ steps.channel.outputs.status }}
+          userFraction: ${{ steps.channel.outputs.user_fraction }}
           whatsNewDirectory: distribution/whatsnew
 
       - name: Record where it landed
@@ -194,6 +484,64 @@ jobs:
             echo "- event: \`${{ github.event_name }}\`"
             echo "- track: \`${{ steps.channel.outputs.track }}\`"
             echo "- status: \`${{ steps.channel.outputs.status }}\`"
+            echo "- userFraction: \`${{ steps.channel.outputs.user_fraction || 'none' }}\`"
             echo "- versionCode: \`$(node -p "require('./app.json').expo.android.versionCode" 2>/dev/null || echo unknown)\`"
             echo "- version: \`$(node -p "require('./app.json').expo.version" 2>/dev/null || echo unknown)\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record staged rollout on the GitHub release (tag path)
+        # Issue #230 (design §3): on a tag publish, record the rollout on the
+        # GitHub release itself — fraction + versionCode + status inProgress —
+        # so the Sentry loop dispatches halt/complete against the recorded
+        # versionCode. build.yml creates that release in a parallel workflow,
+        # so poll the releases API for up to ~10 min; if it never appears this
+        # step FAILS LOUDLY (the upload already happened — a red run is the
+        # alarm). Runs only on the tag (push) path and only after a green
+        # upload (no `if: always()`).
+        # Issue #266 (AC2): also record the Play AAB's built debug id
+        # ($BUILT_DEBUG_ID, persisted by the verify step above from the
+        # just-built AAB+map) alongside the versionCode, so a Sentry event
+        # can be traced to this exact build. Each build now has its own
+        # Sentry dist (issue #269); the debug id is the second factor tying
+        # an event to this exact build. The verify step already fails the
+        # job if the id cannot be extracted, so by the time this step runs
+        # it is always set; `:-unknown` only guards against a future
+        # reorder of the steps.
+        if: ${{ github.event_name == 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          VERSION_CODE="$(node -p "require('./app.json').expo.android.versionCode")"
+          FRACTION="${{ steps.channel.outputs.user_fraction }}"
+          STATUS_VALUE="${{ steps.channel.outputs.status }}"
+          RELEASE_ID=""
+          for i in $(seq 1 60); do
+            RELEASE_ID="$(gh api "repos/${{ github.repository }}/releases/tags/${TAG}" --jq '.id // empty' 2>/dev/null || true)"
+            # A 404 prints the gh error JSON to stdout, so a non-numeric
+            # capture means "not found yet" — keep polling, and clear it so
+            # the fail-loudly guard below still fires if the release never
+            # appears (see #251).
+            case "$RELEASE_ID" in
+              ''|*[!0-9]*) RELEASE_ID="" ;;
+              *) break ;;
+            esac
+            echo "GitHub release for tag ${TAG} not found yet (attempt ${i}/60); waiting 10s"
+            sleep 10
+          done
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::GitHub release for tag ${TAG} never appeared after ~10 min — the Play upload happened but the rollout is NOT recorded on the release."
+            exit 1
+          fi
+          gh api "repos/${{ github.repository }}/releases/${RELEASE_ID}" --jq '.body // ""' > /tmp/release-body.txt
+          export ROLLOUT_LINE="Rollout: fraction ${FRACTION} — versionCode ${VERSION_CODE} — status ${STATUS_VALUE} — Play debug id ${BUILT_DEBUG_ID:-unknown}"
+          python3 - <<'PYEOF'
+          import json, os
+          old = open("/tmp/release-body.txt").read()
+          line = os.environ["ROLLOUT_LINE"]
+          new = (old.rstrip("\n") + "\n" + line + "\n") if old.strip() else (line + "\n")
+          json.dump({"body": new}, open("/tmp/release-patch.json", "w"))
+          PYEOF
+          gh api --method PATCH "repos/${{ github.repository }}/releases/${RELEASE_ID}" --input /tmp/release-patch.json > /dev/null
+          echo "Recorded on GitHub release ${RELEASE_ID} (${TAG}): ${ROLLOUT_LINE}"

@@ -7,6 +7,7 @@ import { mergeIncomingMessage } from "../lib/message-merge"
 import { mergeFull, mergePaged, partSig } from "../lib/message-diff-merge"
 import { isColdSessionLoad, isLiveEventForSession } from "../lib/session-load-reconcile"
 import { inferActiveSessions } from "./events"
+import { selectChildren } from "../lib/session-children"
 
 // Helper to convert API response to our internal format
 function parseMessages(response: MessageWithParts[]): { messages: Message[]; parts: Record<string, Part[]> } {
@@ -37,11 +38,20 @@ interface SessionsState {
   hasMore: boolean
   error: string | null
 
+  // Subagent children (#187), keyed by parent session id. Loaded on parent
+  // detail focus via loadChildren; live-created children are upserted here by
+  // the session.created handler in events.ts, only when the parent's key
+  // already exists. Never part of the root `sessions` list.
+  childrenByParent: Record<string, Session[]>
+  childrenLoading: boolean
+  childrenError: string | null
+
   // Actions
   loadSessions: () => Promise<void>
+  loadChildren: (parentID: string) => Promise<void>
   selectSession: (sessionID: string, directory?: string) => Promise<void>
   loadOlderMessages: () => Promise<void>
-  createSession: (title?: string) => Promise<Session | null>
+  createSession: (title?: string, directory?: string) => Promise<Session | null>
   deleteSession: (sessionID: string) => Promise<void>
   sendMessage: (
     text: string,
@@ -96,6 +106,9 @@ export const useSessions = create<SessionsState>((set, get) => ({
   loadingMore: false,
   hasMore: false,
   error: null,
+  childrenByParent: {},
+  childrenLoading: false,
+  childrenError: null,
 
   loadSessions: async () => {
     const connState = useConnections.getState()
@@ -119,6 +132,32 @@ export const useSessions = create<SessionsState>((set, get) => ({
       void inferActiveSessions(sessions)
     } catch (error) {
       set({ error: "errors.loadSessions", isLoading: false })
+    }
+  },
+
+  // #187: fetch the global session pool (same list() as loadSessions, no
+  // params so no roots filter) and keep only this parent's children.
+  // Deliberately its own list() call rather than sharing loadSessions' pool
+  // — simpler, lower-risk; pool-sharing is a follow-up optimisation. A
+  // failure here never touches the root list or the transcript: the section
+  // shows its own error + retry.
+  loadChildren: async (parentID) => {
+    const connState = useConnections.getState()
+    const client = connState.clientForDirectory(undefined) || connState.client
+    if (!client) {
+      set({ childrenError: "No active connection" })
+      return
+    }
+
+    try {
+      set({ childrenLoading: true, childrenError: null })
+      const pool = await client.session.list()
+      set((state) => ({
+        childrenByParent: { ...state.childrenByParent, [parentID]: selectChildren(pool, parentID) },
+        childrenLoading: false,
+      }))
+    } catch (error) {
+      set({ childrenError: "Failed to load subagents", childrenLoading: false })
     }
   },
 
@@ -218,16 +257,16 @@ export const useSessions = create<SessionsState>((set, get) => ({
     }
   },
 
-  createSession: async (title) => {
+  createSession: async (title, directory) => {
     const connState = useConnections.getState()
-    const client = connState.client
+    const client = directory ? (connState.clientForDirectory(directory) ?? connState.client) : connState.client
     if (!client) {
       set({ error: "errors.noActiveConnection" })
       return null
     }
 
     try {
-      const created = await client.session.create({ title })
+      const created = await client.session.create({ title, ...(directory ? { directory } : {}) })
       // Don't optimistically add to sessions list — let loadSessions() handle it
       // to avoid duplicate key errors from race conditions
       set({

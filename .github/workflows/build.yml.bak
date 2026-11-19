@@ -71,6 +71,46 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
+      - name: Derive CI versionCode/versionName
+        # Issue #266: this job used to build at the repo versionCode (51) —
+        # the same code the Play AAB's source tree carries — while shipping a
+        # DIFFERENT JS bundle (different debug id) than the Play AAB. Same
+        # versionCode, different builds: the CI APK went out on the GitHub
+        # release (184 downloads at v0.4.22) indistinguishable from the Play
+        # build, and a fix verified against one build was not proven against
+        # the other. Give every CI build its own Android identity:
+        #   versionCode = 1_000_000 + github.run_number
+        #   versionName = <expo.version>-ci.<github.run_number>
+        #     (via expo.android.version — config-plugins reads
+        #     config.android.version, NOT android.versionName, for the
+        #     Gradle versionName; verified by a local prebuild run)
+        # The ranges are disjoint by construction, so this can never collide
+        # with Play's run_number+100 scheme (publish-play-store.yml, 162 for
+        # 0.4.22) or with the repo versionCode 51: Play reaches 1,000,000 only
+        # after ~999,900 publishes, and CI stays below Android's
+        # 2,100,000,000 cap for ~2.1B runs. github.run_number is monotonic
+        # per workflow, so each CI APK is also an upgrade over the previous
+        # one for sideload users. In-workflow only (app.json is NOT committed
+        # with these values), so `npm run check:versions` in the test job —
+        # which pins the committed 51 to distribution/changelogs/51.txt —
+        # keeps passing unchanged.
+        # The build-fdroid job in this workflow is deliberately NOT touched:
+        # its APK is F-Droid's Binaries: reference (metadata.yml) and must
+        # carry the repo versionCode 51 so F-Droid's from-source rebuild
+        # compares against the same code; publish-fdroid.yml stays at 51 for
+        # the same reason (its repo users upgrade off versionCode).
+        # SENTRY_DIST follows this step (issue #269): the identifiers step
+        # below reads the versionCode derived here into dist
+        # <version>+<versionCode>, the same value the runtime reports
+        # (src/lib/sentry.ts via src/lib/sentry-dist.ts), and the lockstep
+        # assertion step verifies they agree. An upload-side-only change
+        # would repeat the #265 release/dist mismatch, so the dist is
+        # never set here — only derived from the mutated app.json.
+        run: |
+          node -e "const f='app.json';const j=require('./'+f);const v=j.expo.version;j.expo.android=j.expo.android||{};j.expo.android.versionCode=1000000+${{ github.run_number }};j.expo.android.version=v+'-ci.'+${{ github.run_number }};require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+          echo "CI versionCode: $(node -p "require('./app.json').expo.android.versionCode")"
+          echo "CI versionName: $(node -p "require('./app.json').expo.android.version")"
+
       - name: Set Sentry release identifiers
         # sentry.gradle (applied from android/app/build.gradle) defaults the
         # upload's --release/--dist to `${applicationId}@${versionName}+${versionCode}`,
@@ -79,11 +119,39 @@ jobs:
         # mismatch made every uploaded source map land under a release Sentry
         # never looks up, so symbolication silently failed. Pin the Gradle-side
         # values to exactly what the app reports.
+        # Dist (issue #269) is <expo.version>+<expo.android.versionCode>, the
+        # same formula the runtime builds in src/lib/sentry-dist.ts from the
+        # same app.json — so one release+dist identifies exactly one build.
+        # This step runs AFTER "Derive CI versionCode/versionName" and reads
+        # the mutated app.json; a missing code hard-fails here, never silently
+        # uploads under a version-only dist.
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./app.json').expo.version")
+          CODE=$(node -p "require('./app.json').expo.android.versionCode")
+          if [ -z "$CODE" ] || [ "$CODE" = "undefined" ]; then
+            echo "::error::expo.android.versionCode is missing from app.json — cannot derive SENTRY_DIST"
+            exit 1
+          fi
           echo "SENTRY_RELEASE=opencode-mobile@${VERSION}" >> "$GITHUB_ENV"
-          echo "SENTRY_DIST=${VERSION}" >> "$GITHUB_ENV"
-          echo "Sentry release=opencode-mobile@${VERSION} dist=${VERSION}"
+          echo "SENTRY_DIST=${VERSION}+${CODE}" >> "$GITHUB_ENV"
+          echo "Sentry release=opencode-mobile@${VERSION} dist=${VERSION}+${CODE}"
+
+      - name: Assert Sentry dist matches app.json (lockstep)
+        # Issue #269: the runtime dist and the upload dist are computed in two
+        # places from two inputs, so they drifted silently (see #265). Re-read
+        # app.json and fail if SENTRY_DIST is not ${version}+${versionCode} —
+        # the same value src/lib/sentry.ts reports at runtime.
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./app.json').expo.version")
+          CODE=$(node -p "require('./app.json').expo.android.versionCode")
+          EXPECTED="${VERSION}+${CODE}"
+          if [ "${SENTRY_DIST:-}" != "$EXPECTED" ]; then
+            echo "::error::SENTRY_DIST (${SENTRY_DIST:-<unset>}) != app.json version+versionCode ($EXPECTED) — runtime/upload dist mismatch"
+            exit 1
+          fi
+          echo "Lockstep OK: SENTRY_DIST=$SENTRY_DIST matches app.json $EXPECTED"
 
       - name: Expo prebuild
         run: npx expo prebuild --platform android --no-install
@@ -116,9 +184,10 @@ jobs:
 
   # F-Droid rebuilds this app from source using the recipe in
   # distribution/fdroid-submission/metadata.yml (Builds:), which applies
-  # fdroid/expo-application-patches and fdroid/expo-notifications-patches to
-  # strip Firebase Cloud Messaging / Play Install Referrer / Sentry before
-  # compiling. If we only ever publish the full-featured `app-release.apk`
+  # fdroid/expo-application-patches, fdroid/expo-notifications-patches and
+  # fdroid/expo-store-review-patches to
+  # strip Firebase Cloud Messaging / Play Install Referrer / Play In-App Review
+  # / Sentry before compiling. If we only ever publish the full-featured `app-release.apk`
   # (built above, unpatched) and metadata.yml's `Binaries:` points at it,
   # F-Droid's reproducible-build check compares its from-source (patched)
   # rebuild against that (unpatched) reference binary and can never match —
@@ -204,6 +273,12 @@ jobs:
             node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle
           printf '\nkotlin.jvm.target.validation.mode=warning\n' >> android/gradle.properties
 
+          # Pin react_native_dev_server_ip to localhost (fdroid/react-native-dev-server-ip.patch):
+          # the RN gradle plugin bakes the build machine's IP into the APK;
+          # the patch adds a reactNativeDevServerIp property (see
+          # android/gradle.properties). Mirrors metadata.yml prebuild.
+          patch -p1 -d node_modules/@react-native/gradle-plugin < fdroid/react-native-dev-server-ip.patch
+
           # Strip Firebase Cloud Messaging from expo-notifications.
           sed -i '/firebase/d' node_modules/expo-notifications/android/build.gradle
           cp -a fdroid/expo-notifications-patches/. \
@@ -216,6 +291,15 @@ jobs:
           sed -i '/installreferrer/d' node_modules/expo-application/android/build.gradle
           cp -a fdroid/expo-application-patches/. \
             node_modules/expo-application/android/src/main/java/expo/modules/application/
+
+          # Strip Google Play In-App Review (Play-only APIs) from expo-store-review.
+          # Without this, F-Droid's scanner deletes the module's whole build.gradle
+          # (usual-suspect hit + `scandelete: node_modules`) and the reference
+          # binary keeps the Play Review code/resources, so the reproducible-build
+          # comparison can never match — see issue #95.
+          sed -i '/play:review/d; /play-services-base/d' node_modules/expo-store-review/android/build.gradle
+          cp -a fdroid/expo-store-review-patches/. \
+            node_modules/expo-store-review/android/src/main/java/expo/modules/storereview/
 
       - name: Setup signing
         run: |
@@ -237,30 +321,21 @@ jobs:
           fi
 
       - name: Build F-Droid-flavored APK
+        # Gradle signs v1+v2-only via the committed android/app/build.gradle
+        # flags (signingConfigs.release: enableV3Signing/enableV4Signing
+        # false — androguard, used by fdroidserver, crashes parsing a v2+v3
+        # signature block pair). This job does NOT run `npx expo prebuild`,
+        # it patches the committed android/ tree directly, so those flags
+        # survive here.
+        #
+        # Do NOT re-sign with the `apksigner` CLI here: apksigner rewrites
+        # Zipflinger's 2-byte zero alignment padding into 0xD935 zipalign
+        # extra fields, shifting local-header offsets and breaking F-Droid's
+        # reproducible-build v2 digest — the reference APK then never matches
+        # F-Droid's from-source rebuild even though all entries are
+        # byte-identical. See issue #95 / pipeline 3081125466.
         working-directory: android
         run: ./gradlew assembleRelease
-
-      - name: Re-sign APK v1+v2 only (drop v3/v4 for fdroidserver compatibility)
-        if: ${{ env.RELEASE_STORE_FILE != '' }}
-        run: |
-          # Same rationale as publish-fdroid.yml: androguard (used by
-          # fdroidserver) crashes parsing a v2+v3 signature block pair. Force
-          # v1+v2-only here deterministically.
-          APK=android/app/build/outputs/apk/release/app-release.apk
-          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          echo "Using $APKSIGNER"
-          "$APKSIGNER" sign \
-            --ks android/app/release.keystore \
-            --ks-pass "pass:${RELEASE_STORE_PASSWORD}" \
-            --ks-key-alias "${RELEASE_KEY_ALIAS}" \
-            --key-pass "pass:${RELEASE_KEY_PASSWORD}" \
-            --v1-signing-enabled true \
-            --v2-signing-enabled true \
-            --v3-signing-enabled false \
-            --v4-signing-enabled false \
-            "$APK"
-          echo "=== signature schemes after re-sign ==="
-          "$APKSIGNER" verify -v "$APK" | grep -i "Verified using" || true
 
       - name: Rename artifact
         run: cp android/app/build/outputs/apk/release/app-release.apk app-release-fdroid.apk

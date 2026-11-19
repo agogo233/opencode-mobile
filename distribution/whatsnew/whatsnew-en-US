@@ -1,6 +1,5 @@
-v0.4.16 — OpenCode v2 servers are now supported
+v0.4.24 — F-Droid build now matches the Play build
 
-• Works with the new OpenCode v2 server API; v1 servers (opencode 1.x) keep working too — no upgrade required.
-• Fixed messages lost when switching project directories.
-• Fixed connections through some tunnels (ngrok, Cloudflare).
-• New "Select text" on any message: full-screen view to select and copy text.
+• The F-Droid APK is no longer re-signed after building, so F-Droid can
+  verify it against the release byte-for-byte.
+• Product Hunt launch materials added — no app change.

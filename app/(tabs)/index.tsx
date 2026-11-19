@@ -241,6 +241,7 @@ export default function SessionsScreen() {
     recentDirectories,
   } = useConnections()
   const authError = useEvents((s) => s.authError)
+  const transport = useEvents((s) => s.transport)
   const reconnect = useEvents((s) => s.connect)
   // Whole-record selectors with stable references (zustand v5: a selector
   // that builds a new object every call would re-render forever). These
@@ -432,7 +433,7 @@ export default function SessionsScreen() {
         const dirClient = clientForDirectory(dir.trim())
         if (!dirClient) return
         try {
-          const session = await dirClient.session.create({})
+          const session = await dirClient.session.create({ directory: dir.trim() })
           addRecentDirectory(dir.trim())
           setShowNewSession(false)
           setCustomDir("")
@@ -608,7 +609,13 @@ export default function SessionsScreen() {
         testID="connection-status-bar"
       >
         <View style={styles.connectionInfo}>
-          <View style={[styles.connectionDot, { backgroundColor: "#22c55e" }]} testID="connection-status-dot" />
+          {/* Green only when the SSE transport is verified live (#186):
+              amber while connecting, idle, or reconnecting — the dot used to
+              be hardcoded green regardless of stream health. */}
+          <View
+            style={[styles.connectionDot, { backgroundColor: transport === "live" ? "#22c55e" : "#f59e0b" }]}
+            testID="connection-status-dot"
+          />
           <Text style={[styles.connectionName, isDark && styles.textDark]} numberOfLines={1}>
             {activeConnection.name}
           </Text>

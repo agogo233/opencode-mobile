@@ -117,7 +117,8 @@
       "title": "Choose Language",
       "system": "System Default",
       "en": "English",
-      "zhHans": "Simplified Chinese"
+      "zhHans": "Simplified Chinese",
+      "ru": "Russian"
     },
     "footer": {
       "appName": "OpenCode Mobile",
@@ -136,10 +137,22 @@
     },
     "banners": {
       "reconnecting": "Reconnecting… (attempt {{attempt}})",
+      "lastError": "Last error: {{error}}",
       "connected": "Connected ✓",
       "reverted": "Message reverted — resend to confirm",
       "undo": "Undo",
-      "dismiss": "Dismiss"
+      "dismiss": "Dismiss",
+      "errorNextAction": "Check the server connection, then resend."
+    },
+    "nav": {
+      "previous": "Previous",
+      "next": "Next",
+      "latest": "Latest",
+      "previousLabel": "Previous message",
+      "nextLabel": "Next message",
+      "latestLabel": "Latest message",
+      "counter": "{{current}} / {{total}}",
+      "counterLabel": "Message {{current}} of {{total}}"
     },
     "sheet": {
       "thinking": "Thinking",
@@ -164,6 +177,7 @@
       "replace": "Replace",
       "selectText": "Select text",
       "copyAll": "Copy all",
+      "copy": "Copy",
       "copied": "Copied"
     },
     "alerts": {
@@ -572,6 +586,17 @@
         "hoursAgo": "{{count}}h ago",
         "daysAgo": "{{count}}d ago"
       }
+    },
+    "subagents": {
+      "title": "Subagents",
+      "running": "Running",
+      "done": "Done",
+      "idle": "Idle",
+      "failed": "Failed",
+      "none": "No subagents yet",
+      "loadError": "Couldn't load subagents",
+      "retry": "Retry",
+      "summary": "{{count}} subagents · {{detail}}"
     }
   },
   "fileBrowser": {
