@@ -7,7 +7,7 @@ import {
   type TailscalePhase,
   type TailscaleStatus,
 } from "../lib/tailscale"
-import { canStart, controlUrlGate } from "../lib/tailscale-policy"
+import { autoRetryAllowed, canStart, controlUrlGate } from "../lib/tailscale-policy"
 import { isInsecureControlUrl } from "../lib/control-url"
 
 export interface TailscaleConfig {
@@ -62,6 +62,12 @@ function randomDeviceName(): string {
 // so concurrent client builds can neither create duplicate loopback forwards
 // nor race a user-triggered stop/reconfigure mid-flight.
 let opChain: Promise<unknown> = Promise.resolve()
+
+// Timestamp of the last failed AUTOMATIC start attempt (the ensureForward
+// path). Navigation-triggered client builds must not stack another blocking
+// connect onto every build while the tailnet is down; user-initiated starts
+// reset it so the banner/settings button always retries immediately.
+let lastAutoFailAt = 0
 
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
   const run = opChain.then(task)
@@ -172,10 +178,19 @@ async function doEnsureForward(targetUrl: string): Promise<number | null> {
     // (status polling drives the UI) instead of stacking another start.
     if (status?.phase === "connecting") return null
     if (!authKey && !controlUrl) return null
+    if (!autoRetryAllowed(lastAutoFailAt, Date.now())) return null
     const ok = await doStart()
-    if (!ok) return null
+    if (!ok) {
+      lastAutoFailAt = Date.now()
+      return null
+    }
     status = await native.status().catch(() => null)
-    if (!status || status.phase !== "connected") return null
+    if (!status || status.phase !== "connected") {
+      // Covers a failed connect as well as a keyless enrollment still inside
+      // its approval window (which ensureForward cannot serve yet anyway).
+      lastAutoFailAt = Date.now()
+      return null
+    }
   }
   // Reuse the existing forward only when THIS forward is still registered. A
   // forward whose accept loop died (or that vanished with a restarted node)
@@ -265,7 +280,12 @@ export const useTailscale = create<TailscaleState>((set) => ({
     if (status) set(applyStatus(status))
   },
 
-  start: () => enqueue(() => doStart()),
+  // User-initiated start: always allowed, clears the auto-retry cooldown.
+  start: () =>
+    enqueue(() => {
+      lastAutoFailAt = 0
+      return doStart()
+    }),
 
   stop: () => enqueue(() => doStop()),
 

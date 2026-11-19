@@ -19,3 +19,13 @@ export function controlUrlGate(isInsecure: boolean, allowInsecure: boolean): Con
   if (!isInsecure) return "ok"
   return allowInsecure ? "confirm" : "block"
 }
+
+// After an automatic start attempt fails, hold off on stacking another
+// blocking connect onto every client build (each attempt can block for up to
+// a minute). User-initiated starts bypass the cooldown entirely — the store
+// resets the timestamp whenever the user presses start/reconnect.
+export const AUTO_RETRY_COOLDOWN_MS = 60_000
+
+export function autoRetryAllowed(lastFailAt: number, now: number): boolean {
+  return now - lastFailAt >= AUTO_RETRY_COOLDOWN_MS
+}
