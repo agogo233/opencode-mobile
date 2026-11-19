@@ -59,21 +59,29 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         unregisterNetworkWatcher()
         executor.execute {
             forwarder.close()
-            clearStartedIdentity()
+            clearStartedIdentity(keepAllowlist = false)
         }
         // Graceful shutdown: the queued close task above still runs, but no
         // further work can be submitted after the catalyst instance is gone.
         executor.shutdown()
     }
 
-    private fun clearStartedIdentity() {
+    // keepAllowlist=false wipes the direct-connect target registry too; that
+    // is only right when the RN context itself is gone. An explicit stop()
+    // keeps the registry so a restart routes the already-registered targets
+    // immediately instead of stranding active direct connections. The
+    // allowlist is not identity material (host:port only), so keeping it
+    // across stops does not widen the exposure.
+    private fun clearStartedIdentity(keepAllowlist: Boolean) {
         startedControlUrl = null
         startedAuthKey = null
         startedHostname = null
         startedEphemeral = false
         TailscaleProxyState.socksPort = 0
-        TailscaleProxyState.directHosts.clear()
-        runCatching { forwarder.clearSocksTargets() }
+        if (!keepAllowlist) {
+            TailscaleProxyState.directHosts.clear()
+            runCatching { forwarder.clearSocksTargets() }
+        }
     }
 
     // Runs a task on the bridge executor. After the catalyst instance is
@@ -135,8 +143,9 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
             try {
                 forwarder.close()
                 // Don't keep the identity (incl. the auth key) in memory once
-                // the user explicitly stopped the node.
-                clearStartedIdentity()
+                // the user explicitly stopped the node; the direct-connect
+                // target registry survives so a restart reconnects instantly.
+                clearStartedIdentity(keepAllowlist = true)
                 promise.resolve(statusMap())
             } catch (e: Exception) {
                 promise.reject("TS_STOP", e.message, e)
@@ -231,6 +240,10 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         }
         runCatching {
             TailscaleProxyState.socksPort = forwarder.startSocks5(0).toInt()
+        }.onFailure {
+            // Never leave a stale port behind: the selector would route into
+            // a dead listener. Fail closed instead (socksPort stays 0).
+            TailscaleProxyState.socksPort = 0
         }
     }
 
@@ -243,13 +256,15 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     }
 
     // Registers a canonical "host:port" target for direct mode. The same
-    // allowlist is mirrored into the Go proxy as a second gate.
+    // allowlist is mirrored into the Go proxy as a second gate; the Go side
+    // is written first so a bridge failure can never leave the Java selector
+    // allowing a target the Go gate would reject.
     @ReactMethod
     fun registerDirectHost(target: String, promise: Promise) {
         dispatch(promise) {
             val normalized = target.trim().lowercase()
-            TailscaleProxyState.directHosts.add(normalized)
             forwarder.allowSocksTarget(normalized)
+            TailscaleProxyState.directHosts.add(normalized)
             promise.resolve(null)
         }
     }
@@ -258,8 +273,8 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     fun unregisterDirectHost(target: String, promise: Promise) {
         dispatch(promise) {
             val normalized = target.trim().lowercase()
-            TailscaleProxyState.directHosts.remove(normalized)
             forwarder.disallowSocksTarget(normalized)
+            TailscaleProxyState.directHosts.remove(normalized)
             promise.resolve(null)
         }
     }

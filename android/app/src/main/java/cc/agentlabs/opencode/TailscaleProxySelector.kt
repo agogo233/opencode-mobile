@@ -31,10 +31,15 @@ object TailscaleProxyState {
 class TailscaleProxySelector : ProxySelector() {
     override fun select(uri: URI?): List<Proxy> {
         if (uri == null || !TailscaleProxyState.directMode) return listOf(Proxy.NO_PROXY)
-        val port = TailscaleProxyState.socksPort
-        if (port == 0) return listOf(Proxy.NO_PROXY)
         val target = normalizeTarget(uri) ?: return listOf(Proxy.NO_PROXY)
         if (!TailscaleProxyState.directHosts.contains(target)) return listOf(Proxy.NO_PROXY)
+        val port = TailscaleProxyState.socksPort
+        if (port == 0) {
+            // Direct mode is on but the proxy listener is down (node stopped
+            // or proxy start failure). Fail the request instead of leaking
+            // plaintext to the tailnet address.
+            return emptyList()
+        }
         return listOf(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
     }
 

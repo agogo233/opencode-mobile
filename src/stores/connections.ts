@@ -49,7 +49,7 @@ interface ConnectionsState {
   addConnection: (connection: Omit<ServerConnection, "id">, password?: string) => Promise<void>
   removeConnection: (id: string) => Promise<void>
   setActiveConnection: (id: string) => Promise<void>
-testConnection: (connection: ServerConnection, password?: string) => Promise<{ ok: boolean; api?: ServerApi; serverVersion?: string; error?: string; probeUrl?: string }>
+  testConnection: (connection: ServerConnection, password?: string) => Promise<{ ok: boolean; api?: ServerApi; serverVersion?: string; error?: string; probeUrl?: string }>
   updateConnection: (id: string, updates: Partial<ServerConnection>, password?: string) => Promise<void>
   refreshProject: () => Promise<void>
   // Create a one-off client pointing at a specific directory (for cross-project operations).
