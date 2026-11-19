@@ -114,7 +114,15 @@ jobs:
 
       - name: Build release APK (arm64-v8a + x86_64 for CI)
         working-directory: android
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a -PtsAbis=arm64-v8a,x86_64
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a -PtsAbis=arm64-v8a,x86_64 2>&1 | tee build-output.txt; exit ${PIPESTATUS[0]}
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 7
+          name: gradle-build-log
+          path: android/build-output.txt
 
       - name: Rename artifact
         run: cp android/app/build/outputs/apk/release/app-release.apk app-release-ci.apk
