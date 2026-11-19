@@ -20,6 +20,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 
 class TailscalePackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext) =
@@ -36,7 +37,19 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
 
     private val executor = Executors.newSingleThreadExecutor()
     private val forwarder: Forwarder = Mobiletsnet.newForwarder()
-    private var networkWatcherRegistered = false
+
+    // Atomic: the enrollment thread and the executor can both reach the
+    // watcher register/unregister paths, and destroy runs on its own thread;
+    // compareAndSet keeps the flag and the actual callback registration in
+    // step without a lock.
+    private val networkWatcherRegistered = AtomicBoolean(false)
+
+    // Set once the RN context is gone. The keyless-enrollment thread does not
+    // run on the executor (which is shut down on destroy), so every start
+    // task checks this flag first; combined with the Go-side refusal to
+    // connect a closed forwarder it prevents reviving the node after destroy.
+    @Volatile
+    private var destroyed = false
     // Identity of the last start() so a repeated call with the same config can
     // skip the expensive close + reconnect (tsnet bring-up can take seconds).
     // Volatile: a keyless enrollment runs on its own thread while the shared
@@ -56,6 +69,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     override fun getName() = "Tailscale"
 
     override fun onCatalystInstanceDestroy() {
+        destroyed = true
         unregisterNetworkWatcher()
         executor.execute {
             forwarder.close()
@@ -99,6 +113,10 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     @ReactMethod
     fun start(controlUrl: String, authKey: String, hostname: String, ephemeral: Boolean, promise: Promise) {
         val task: () -> Unit = {
+            if (destroyed) {
+                promise.reject("TS_SHUTDOWN", "Tailscale module destroyed", null)
+                return@task
+            }
             try {
                 // Interface info must be supplied before tsnet boots: Android
                 // denies Go's netlink interface enumeration on API 30+.
@@ -348,18 +366,16 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     }
 
     private fun registerNetworkWatcher() {
-        if (networkWatcherRegistered) return
+        if (!networkWatcherRegistered.compareAndSet(false, true)) return
         connectivity().registerDefaultNetworkCallback(networkCallback)
-        networkWatcherRegistered = true
     }
 
     private fun unregisterNetworkWatcher() {
-        if (!networkWatcherRegistered) return
+        if (!networkWatcherRegistered.compareAndSet(true, false)) return
         try {
             connectivity().unregisterNetworkCallback(networkCallback)
         } catch (_: Exception) {
             // callback may already be gone with the process
         }
-        networkWatcherRegistered = false
     }
 }

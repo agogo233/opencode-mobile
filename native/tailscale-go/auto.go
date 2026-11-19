@@ -68,7 +68,9 @@ func (f *Forwarder) startHTTPForwardID(targetURL string, port, localPort int) (s
 	// a concurrent Close cannot slip in between and leak the listener.
 	f.mu.Lock()
 	server := f.server
-	if server == nil {
+	// Same gate as StartForward/StartSocks5: a half-booted node must not
+	// hand out forwards that can only fail once they start dialing.
+	if server == nil || f.phase != "connected" {
 		f.mu.Unlock()
 		return "", errors.New("tsnet is not connected")
 	}

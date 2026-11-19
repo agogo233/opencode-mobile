@@ -103,6 +103,36 @@ func TestConfigurePersistsNormalizedState(t *testing.T) {
 	}
 }
 
+func TestConnectAfterCloseIsRefused(t *testing.T) {
+	f := New()
+	if err := f.Configure("tskey-auth-test", "android", t.TempDir()); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	f.Close()
+	if err := f.Connect(); err == nil {
+		t.Fatal("Connect() after Close() succeeded, want an error")
+	}
+	if got := f.Status().Phase; got != "closed" {
+		t.Fatalf("phase = %q after refused connect, want closed", got)
+	}
+}
+
+func TestRestartAfterCloseLeavesClosedPhase(t *testing.T) {
+	f := New()
+	if err := f.Configure("tskey-auth-test", "android", t.TempDir()); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	f.Close()
+	// A legitimate restart re-configures before connecting; the refused
+	// state must not stick, otherwise stop/start would never work.
+	if err := f.Configure("tskey-auth-test", "android", t.TempDir()); err != nil {
+		t.Fatalf("re-Configure() error = %v", err)
+	}
+	if got := f.Status().Phase; got == "closed" {
+		t.Fatal("phase still closed after re-Configure, restart would be refused")
+	}
+}
+
 func TestStartForwardValidation(t *testing.T) {
 	f := New()
 	cases := []struct {

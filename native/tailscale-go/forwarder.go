@@ -174,6 +174,15 @@ func (f *Forwarder) Connect() (err error) {
 		}
 	}()
 	f.mu.Lock()
+	if f.server == nil && f.phase == "closed" {
+		// A Close() went through and nothing re-configured the forwarder
+		// yet. Refuse to bring the node back up so a late enrollment
+		// thread (or any stray connect) cannot revive it behind the
+		// user's back. A legitimate restart always runs Configure first,
+		// which flips the phase out of "closed".
+		f.mu.Unlock()
+		return errors.New("forwarder is closed")
+	}
 	if f.server != nil {
 		// Idempotent re-entry. A connected node reports healthy; an in-flight
 		// connect/enrollment attempt keeps its phase so status polling can
@@ -231,11 +240,15 @@ func (f *Forwarder) Connect() (err error) {
 	}
 
 	f.mu.Lock()
-	if f.server == server {
-		f.phase = "connected"
-		f.lastErr = ""
-		f.loginURL = ""
+	if f.server != server {
+		// A concurrent Close() replaced this attempt while the node was
+		// coming up: report the abort instead of a misleading success.
+		f.mu.Unlock()
+		return errors.New("forwarder closed during connect")
 	}
+	f.phase = "connected"
+	f.lastErr = ""
+	f.loginURL = ""
 	f.mu.Unlock()
 	return nil
 }
