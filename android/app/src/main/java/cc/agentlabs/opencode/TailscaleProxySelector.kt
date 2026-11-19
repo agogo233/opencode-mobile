@@ -26,8 +26,9 @@ object TailscaleProxyState {
 // Routes OkHttp traffic in direct mode: only registered server targets go
 // through the embedded tsnet SOCKS5 proxy; everything else (crash reporting,
 // update checks, non-tailscale connections) connects directly. The Go side
-// enforces the same allowlist as a second gate, so the exposure matches the
-// per-target relay mode.
+// enforces the same allowlist as a second gate. One loopback port can reach
+// every registered target (relay mode exposes one port per target), so the
+// reachable set is identical but the port footprint is smaller.
 class TailscaleProxySelector : ProxySelector() {
     override fun select(uri: URI?): List<Proxy> {
         if (uri == null || !TailscaleProxyState.directMode) return listOf(Proxy.NO_PROXY)
@@ -36,9 +37,11 @@ class TailscaleProxySelector : ProxySelector() {
         val port = TailscaleProxyState.socksPort
         if (port == 0) {
             // Direct mode is on but the proxy listener is down (node stopped
-            // or proxy start failure). Fail the request instead of leaking
-            // plaintext to the tailnet address.
-            return emptyList()
+            // or proxy start failure). Route into a guaranteed-dead local
+            // port: an empty list would make OkHttp fall back to NO_PROXY
+            // (plaintext), so fail the request fast with zero bytes leaving
+            // the device.
+            return listOf(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", 1)))
         }
         return listOf(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
     }

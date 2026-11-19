@@ -107,8 +107,10 @@ func (f *Forwarder) GetSocksPort() int {
 }
 
 // AllowSocksTarget registers a "host:port" target the direct-connect proxy
-// may dial. Unregistered targets are refused (connection not allowed), so the
-// proxy's exposure matches the per-target relay mode.
+// may dial. Unregistered targets are refused (connection not allowed). One
+// loopback port can reach every registered target (relay mode exposes one
+// port per target); the reachable set is identical, the port footprint
+// smaller.
 func (f *Forwarder) AllowSocksTarget(target string) {
 	f.forwardMu.Lock()
 	defer f.forwardMu.Unlock()
