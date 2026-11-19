@@ -67,6 +67,9 @@
         "loginCopy": "Copy link",
         "insecureControlTitle": "Use an HTTP control server?",
         "insecureControlMessage": "The control server URL uses http://, so your auth key would travel unencrypted. Only continue on a trusted internal network.",
+        "insecureControlBlockedTitle": "Plaintext control server disabled",
+        "insecureControlBlockedMessage": "The control server URL uses http://, so your auth key would travel unencrypted. Switch the server to https://, or long-press the Identity heading to allow plaintext explicitly.",
+        "allowInsecureControl": "Allow plaintext control server (unsafe)",
         "help": "The first connect uses an auth key, or interactive approval in your control server's web UI (Headscale 0.23+). The node identity is kept on this device, so later starts reconnect automatically. Traffic to the opencode server is end-to-end encrypted through your tailnet.",
         "errors": {
           "configRequired": "Enter an auth key or a control server URL to start Tailscale.",

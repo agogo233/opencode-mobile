@@ -35,6 +35,7 @@ const ALLOWED_PERSISTED_KEYS = new Map<string, string>([
   ["TAILSCALE_STORAGE_KEYS.controlUrl", "user-entered tailnet control server URL (official or Headscale)"],
   ["TAILSCALE_STORAGE_KEYS.authKey", "user-entered tailnet auth key (SecureStore-encrypted at rest)"],
   ["TAILSCALE_STORAGE_KEYS.hostname", "user-configured tailnet node hostname"],
+  ["TAILSCALE_STORAGE_KEYS.allowInsecureControl", "user consent flag: permits plaintext http:// tailnet control servers"],
 ])
 
 const SRC = path.join(import.meta.dirname, "..")

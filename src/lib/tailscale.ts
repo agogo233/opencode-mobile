@@ -39,4 +39,5 @@ export const TAILSCALE_STORAGE_KEYS = {
   controlUrl: "opencode_ts_control_url",
   authKey: "opencode_ts_auth_key",
   hostname: "opencode_ts_hostname",
+  allowInsecureControl: "opencode_ts_allow_insecure_control",
 } as const

@@ -9,3 +9,13 @@ import type { TailscalePhase } from "./tailscale"
 export function canStart(phase: TailscalePhase): boolean {
   return phase !== "connecting"
 }
+
+export type ControlUrlDecision = "ok" | "confirm" | "block"
+
+// Gate for plaintext (http://) control servers: blocked by default, upgraded
+// to a confirmation prompt once the user explicitly allows plaintext via the
+// hidden switch.
+export function controlUrlGate(isInsecure: boolean, allowInsecure: boolean): ControlUrlDecision {
+  if (!isInsecure) return "ok"
+  return allowInsecure ? "confirm" : "block"
+}

@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  Switch,
   useColorScheme,
   Platform,
   Alert,
@@ -18,6 +19,7 @@ import * as Clipboard from "expo-clipboard"
 import { useTailscale } from "../../src/stores/tailscale"
 import { tailscaleNative } from "../../src/lib/tailscale"
 import { isInsecureControlUrl } from "../../src/lib/control-url"
+import { controlUrlGate } from "../../src/lib/tailscale-policy"
 
 const PHASE_COLORS: Record<string, string> = {
   connected: "#22c55e",
@@ -30,7 +32,7 @@ export default function TailscaleSettingsScreen() {
   const isDark = colorScheme === "dark"
   const { t } = useTranslation()
 
-  const { phase, ipv4, ipv6, error, loginUrl, controlUrl, authKey, deviceName, busy, loadConfig, saveConfig, start, stop, refresh } =
+  const { phase, ipv4, ipv6, error, loginUrl, controlUrl, authKey, deviceName, busy, allowInsecureControl, loadConfig, saveConfig, setAllowInsecureControl, start, stop, refresh } =
     useTailscale()
 
   const [controlUrlInput, setControlUrlInput] = useState("")
@@ -40,6 +42,8 @@ export default function TailscaleSettingsScreen() {
   const [hydrated, setHydrated] = useState(false)
   const [copied, setCopied] = useState(false)
   const [loginCopied, setLoginCopied] = useState(false)
+  // Escape hatch UI: hidden until the user long-presses the Identity heading.
+  const [showInsecureToggle, setShowInsecureToggle] = useState(false)
 
   useEffect(() => {
     loadConfig()
@@ -93,7 +97,15 @@ export default function TailscaleSettingsScreen() {
       Alert.alert(t("settings.tailscale.page.notConfiguredTitle"), t("settings.tailscale.page.notConfigured"))
       return
     }
-    if (isInsecureControlUrl(controlUrlInput) && !(await confirmInsecureControl())) return
+    const decision = controlUrlGate(isInsecureControlUrl(controlUrlInput), allowInsecureControl)
+    if (decision === "block") {
+      Alert.alert(
+        t("settings.tailscale.page.insecureControlBlockedTitle"),
+        t("settings.tailscale.page.insecureControlBlockedMessage"),
+      )
+      return
+    }
+    if (decision === "confirm" && !(await confirmInsecureControl())) return
     await saveConfig({ controlUrl: controlUrlInput, authKey: authKeyInput, hostname: hostnameInput })
     await start()
   }
@@ -207,7 +219,12 @@ export default function TailscaleSettingsScreen() {
         )}
 
         {/* Identity */}
-        <Text style={[styles.sectionTitle, isDark && styles.textDark]}>{t("settings.tailscale.page.identityTitle")}</Text>
+        <Text
+          style={[styles.sectionTitle, isDark && styles.textDark]}
+          onLongPress={() => setShowInsecureToggle(!showInsecureToggle)}
+        >
+          {t("settings.tailscale.page.identityTitle")}
+        </Text>
         <View style={[styles.card, isDark && styles.cardDark]}>
           <Text style={[styles.label, isDark && styles.labelDark]}>
             {t("settings.tailscale.page.controlUrl")}
@@ -253,6 +270,22 @@ export default function TailscaleSettingsScreen() {
             autoCorrect={false}
           />
           <Text style={[styles.hint, isDark && styles.hintDark]}>{t("settings.tailscale.page.hostnameHint")}</Text>
+
+          {showInsecureToggle && (
+            <View style={styles.insecureRow}>
+              <Text style={[styles.hint, isDark && styles.hintDark]}>
+                {t("settings.tailscale.page.allowInsecureControl")}
+              </Text>
+              <Switch
+                value={allowInsecureControl}
+                onValueChange={(value) => {
+                  // Persist may fail (device-locked keystore); the store only
+                  // updates on success, so the switch visually snaps back.
+                  void setAllowInsecureControl(value).catch(() => {})
+                }}
+              />
+            </View>
+          )}
         </View>
 
         {/* Primary action */}
@@ -411,6 +444,12 @@ const styles = StyleSheet.create({
   },
   keyInput: {
     flex: 1,
+  },
+  insecureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
   },
   hint: {
     fontSize: 12,

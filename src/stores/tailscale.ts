@@ -7,7 +7,8 @@ import {
   type TailscalePhase,
   type TailscaleStatus,
 } from "../lib/tailscale"
-import { canStart } from "../lib/tailscale-policy"
+import { canStart, controlUrlGate } from "../lib/tailscale-policy"
+import { isInsecureControlUrl } from "../lib/control-url"
 
 export interface TailscaleConfig {
   controlUrl: string
@@ -28,6 +29,9 @@ interface TailscaleState {
   authKey: string
   deviceName: string
   configLoaded: boolean
+  // Escape hatch for plaintext (http://) control servers. Default false:
+  // insecure URLs are rejected outright until the user opts in.
+  allowInsecureControl: boolean
   // Active loopback forward to the opencode server
   forwardId: string | null
   forwardPort: number | null
@@ -37,6 +41,7 @@ interface TailscaleState {
 
   loadConfig: () => Promise<void>
   saveConfig: (config: TailscaleConfig) => Promise<void>
+  setAllowInsecureControl: (value: boolean) => Promise<void>
   refresh: () => Promise<void>
   start: () => Promise<boolean>
   stop: () => Promise<void>
@@ -81,9 +86,17 @@ async function doStart(): Promise<boolean> {
   // would tear it down and reset the approval window. Status polling drives
   // the UI instead.
   if (!canStart(useTailscale.getState().phase)) return false
-  const { controlUrl, authKey, deviceName } = useTailscale.getState()
+  const { controlUrl, authKey, deviceName, allowInsecureControl } = useTailscale.getState()
   if (!authKey && !controlUrl) {
     useTailscale.setState({ phase: "error", error: i18n.t("settings.tailscale.page.errors.configRequired") })
+    return false
+  }
+  // Default-deny for plaintext control servers on EVERY start path, not just
+  // the settings page: auto-starts via ensureForward must honor the consent
+  // flag too. With consent granted there is no interactive step on reconnect,
+  // so the stored URL is used as-is.
+  if (controlUrl && controlUrlGate(isInsecureControlUrl(controlUrl), allowInsecureControl) === "block") {
+    useTailscale.setState({ phase: "error", error: i18n.t("settings.tailscale.page.insecureControlBlockedMessage") })
     return false
   }
   // Starting (re)creates the node: any existing loopback forward dies with
@@ -102,7 +115,10 @@ async function doStart(): Promise<boolean> {
     // Keyless interactive enrollment blocks the native call for minutes while
     // the user approves the node in the control server's web UI. Fire and
     // forget so the serial op chain stays free; progress is tracked via the
-    // status polling (phase "connecting" + loginUrl).
+    // status polling (phase "connecting" + loginUrl). Flip the phase
+    // optimistically so a rapid double-tap hits the canStart gate before the
+    // first native call even lands.
+    useTailscale.setState({ phase: "connecting", error: "" })
     void native
       .start(controlUrl, "", deviceName)
       .then((status) => {
@@ -200,23 +216,31 @@ export const useTailscale = create<TailscaleState>((set) => ({
   authKey: "",
   deviceName: "",
   configLoaded: false,
+  allowInsecureControl: false,
   forwardId: null,
   forwardPort: null,
   forwardTarget: null,
   busy: false,
 
   loadConfig: async () => {
-    const [controlUrl, authKey, hostname] = await Promise.all([
+    const [controlUrl, authKey, hostname, allowInsecureControl] = await Promise.all([
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.controlUrl),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.authKey),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.hostname),
+      SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.allowInsecureControl),
     ])
     set({
       controlUrl: controlUrl ?? "",
       authKey: authKey ?? "",
       deviceName: hostname ?? "",
+      allowInsecureControl: allowInsecureControl === "true",
       configLoaded: true,
     })
+  },
+
+  setAllowInsecureControl: async (value) => {
+    await SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.allowInsecureControl, value ? "true" : "false")
+    set({ allowInsecureControl: value })
   },
 
   saveConfig: async (config) => {
