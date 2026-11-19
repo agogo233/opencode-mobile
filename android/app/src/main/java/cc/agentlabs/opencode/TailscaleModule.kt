@@ -72,6 +72,8 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         startedHostname = null
         startedEphemeral = false
         TailscaleProxyState.socksPort = 0
+        TailscaleProxyState.directHosts.clear()
+        runCatching { forwarder.clearSocksTargets() }
     }
 
     // Runs a task on the bridge executor. After the catalyst instance is
@@ -211,12 +213,55 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
-    // Direct-connect mode: one loopback SOCKS5 proxy serves every tailnet
-    // target through the global OkHttp proxy selector. Ephemeral port; the
-    // selector reads the live port from TailscaleProxyState.
+    // Direct-connect mode: one loopback SOCKS5 proxy serves every registered
+    // target through the global OkHttp proxy selector. Rebuilt on every start
+    // (the Go side replaces the listener, last configuration wins) so the
+    // cached port can never point at a dead listener. Non-fatal: the node is
+    // up either way, direct mode just stays unavailable (socksPort stays 0).
+    // doStart flips directMode before starting the node, so this reflects the
+    // mode the upcoming connections will use. Relay mode keeps no listener at
+    // all, matching the pre-direct-connect behavior.
     private fun ensureSocks5Proxy() {
-        if (TailscaleProxyState.socksPort != 0) return
-        TailscaleProxyState.socksPort = forwarder.startSocks5(0).toInt()
+        if (!TailscaleProxyState.directMode) {
+            if (TailscaleProxyState.socksPort != 0) {
+                forwarder.stopSocks5()
+                TailscaleProxyState.socksPort = 0
+            }
+            return
+        }
+        runCatching {
+            TailscaleProxyState.socksPort = forwarder.startSocks5(0).toInt()
+        }
+    }
+
+    // ---- Direct-connect mode: routing switch + target allowlist ----
+
+    @ReactMethod
+    fun setDirectMode(enabled: Boolean, promise: Promise) {
+        TailscaleProxyState.directMode = enabled
+        promise.resolve(null)
+    }
+
+    // Registers a canonical "host:port" target for direct mode. The same
+    // allowlist is mirrored into the Go proxy as a second gate.
+    @ReactMethod
+    fun registerDirectHost(target: String, promise: Promise) {
+        dispatch(promise) {
+            val normalized = target.trim().lowercase()
+            TailscaleProxyState.directHosts.add(normalized)
+            forwarder.allowSocksTarget(normalized)
+            promise.resolve(null)
+        }
+    }
+
+    @ReactMethod
+    fun unregisterDirectHost(target: String, promise: Promise) {
+        dispatch(promise) {
+            val normalized = target.trim().lowercase()
+            TailscaleProxyState.directHosts.remove(normalized)
+            forwarder.disallowSocksTarget(normalized)
+            promise.resolve(null)
+        }
     }
 
     private fun statusMap(): WritableNativeMap {

@@ -72,6 +72,12 @@
         "allowInsecureControl": "允许明文控制服务器（不安全）",
         "ephemeralLabel": "临时节点",
         "ephemeralHint": "离线后不久自动从 tailnet 注销本设备。推荐配合 Auth Key 使用；无密钥入网每次启动都需重新审批。",
+        "connectionModeTitle": "连接方式",
+        "modeRelay": "中转模式（默认）",
+        "modeRelayDesc": "每个目标一个本机中转口，久经验证的默认方式。",
+        "modeDirect": "直连模式",
+        "modeDirectDesc": "请求经加密通道直达各服务器，无需本机中转口。实验性。",
+        "modeHint": "节点启动时生效。直连模式支持 IP 与 MagicDNS 域名形式的服务器地址。",
         "help": "首次连接可使用 Auth Key，也可在控制服务器网页上交互式确认（Headscale 0.23+）。节点身份会保存在本机，之后启动会自动重连。到 opencode 服务器的流量经由你的 tailnet 端到端加密。",
         "errors": {
           "configRequired": "启动 Tailscale 需要先填写 Auth Key 或控制服务器地址。",

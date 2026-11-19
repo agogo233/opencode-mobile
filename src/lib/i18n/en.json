@@ -72,6 +72,12 @@
         "allowInsecureControl": "Allow plaintext control server (unsafe)",
         "ephemeralLabel": "Ephemeral node",
         "ephemeralHint": "Deregister the device from the tailnet shortly after going offline. Recommended with an auth key; keyless enrollment needs re-approval on every start.",
+        "connectionModeTitle": "Connection mode",
+        "modeRelay": "Relay (default)",
+        "modeRelayDesc": "One local relay port per target. The proven default.",
+        "modeDirect": "Direct connect",
+        "modeDirectDesc": "Requests ride the tunnel straight to each server, with no local relay ports. Experimental.",
+        "modeHint": "Applies when the node starts. Direct mode supports IP and MagicDNS server addresses.",
         "help": "The first connect uses an auth key, or interactive approval in your control server's web UI (Headscale 0.23+). The node identity is kept on this device, so later starts reconnect automatically. Traffic to the opencode server is end-to-end encrypted through your tailnet.",
         "errors": {
           "configRequired": "Enter an auth key or a control server URL to start Tailscale.",

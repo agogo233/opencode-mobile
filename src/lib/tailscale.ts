@@ -31,6 +31,11 @@ interface TailscaleNativeModule {
   isForwardAlive(id: string): Promise<boolean>
   // Stops every native forward; the store owns the node's only forward.
   stopAllForwards(): Promise<void>
+  // Direct-connect mode: routing switch plus the target allowlist. The same
+  // allowlist is mirrored into the Go proxy as a second gate.
+  setDirectMode(enabled: boolean): Promise<void>
+  registerDirectHost(target: string): Promise<void>
+  unregisterDirectHost(target: string): Promise<void>
 }
 
 export function tailscaleNative(): TailscaleNativeModule | null {
@@ -45,4 +50,5 @@ export const TAILSCALE_STORAGE_KEYS = {
   hostname: "opencode_ts_hostname",
   allowInsecureControl: "opencode_ts_allow_insecure_control",
   ephemeral: "opencode_ts_ephemeral",
+  directMode: "opencode_ts_direct_mode",
 } as const

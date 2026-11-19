@@ -8,6 +8,8 @@ import { buildAuth } from "../lib/auth"
 import { stripTrailingSlash } from "../lib/path-utils"
 import i18n from "../lib/i18n/config"
 import { resolveBaseUrl as resolveClientBaseUrl, TailscaleUnavailableError } from "../lib/resolve-base-url"
+import { directTargetFromUrl } from "../lib/direct-target"
+import { tailscaleNative } from "../lib/tailscale"
 import { useTailscale } from "./tailscale"
 
 const CONNECTIONS_KEY = "opencode_connections"
@@ -63,12 +65,21 @@ function generateId(): string {
   return Crypto.randomUUID().replace(/-/g, "").slice(0, 16)
 }
 
-// Resolve the URL a client should actually talk to. Tailscale-type connections
-// go through the embedded tsnet forwarder on loopback (auto-starting the node
-// when needed); every other type connects to the configured URL directly.
-// Fails closed: when the forward is unavailable the caller gets a
+// Resolve the URL a client should actually talk to. Tailscale-type
+// connections go through the embedded tsnet node (auto-starting it when
+// needed); every other type connects to the configured URL directly.
+// Fails closed: when the tunnel is unavailable the caller gets a
 // TailscaleUnavailableError (localized) instead of a direct, untunneled URL.
 async function resolveBaseUrl(connection: Pick<ServerConnection, "type" | "url">): Promise<string> {
+  const tailscale = useTailscale.getState()
+  if (connection.type === "tailscale" && tailscale.directMode) {
+    // Direct-connect mode: talk to the server URL itself; the native network
+    // stack routes this registered target through the embedded node. The
+    // registration lands before the first request rides this connection.
+    const ok = await tailscale.ensureDirectTarget(connection.url)
+    if (!ok) throw new TailscaleUnavailableError(i18n.t("errors.tailscaleUnavailable"))
+    return connection.url
+  }
   try {
     return await resolveClientBaseUrl(connection, useTailscale.getState().ensureForward)
   } catch (error) {
@@ -358,7 +369,18 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   },
 
   removeConnection: async (id) => {
+    const removed = get().connections.find((c) => c.id === id)
     const connections = get().connections.filter((c) => c.id !== id)
+
+    // Drop the removed server from the direct-connect allowlist so deleted
+    // targets stop routing through the embedded node — unless another
+    // connection still points at the same target.
+    if (removed?.type === "tailscale") {
+      const target = directTargetFromUrl(removed.url)
+      if (target && !connections.some((c) => c.type === "tailscale" && directTargetFromUrl(c.url) === target)) {
+        void tailscaleNative()?.unregisterDirectHost(target).catch(() => {})
+      }
+    }
 
     // Remove stored password
     await SecureStore.deleteItemAsync(`${PASSWORDS_PREFIX}${id}`)
@@ -494,6 +516,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
   },
 
   updateConnection: async (id, updates, password) => {
+    const previous = get().connections.find((c) => c.id === id)
     const connections = get().connections.map((c) => {
       if (c.id !== id) return c
       const merged = { ...c, ...updates }
@@ -508,6 +531,20 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     })
 
     await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(connections))
+
+    // A different URL is a different direct-connect target: retire the old
+    // one from the allowlist (the new URL registers on next use) unless
+    // another connection still points at it.
+    if (
+      previous?.type === "tailscale" &&
+      updates.url !== undefined &&
+      updates.url !== previous.url
+    ) {
+      const oldTarget = directTargetFromUrl(previous.url)
+      if (oldTarget && !connections.some((c) => c.type === "tailscale" && directTargetFromUrl(c.url) === oldTarget)) {
+        void tailscaleNative()?.unregisterDirectHost(oldTarget).catch(() => {})
+      }
+    }
 
     // Persist a new password only when one was entered. The edit form loads the
     // password field blank (passwords aren't read back for security), so an

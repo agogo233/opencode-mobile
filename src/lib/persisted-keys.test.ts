@@ -37,6 +37,7 @@ const ALLOWED_PERSISTED_KEYS = new Map<string, string>([
   ["TAILSCALE_STORAGE_KEYS.hostname", "user-configured tailnet node hostname"],
   ["TAILSCALE_STORAGE_KEYS.allowInsecureControl", "user consent flag: permits plaintext http:// tailnet control servers"],
   ["TAILSCALE_STORAGE_KEYS.ephemeral", "user config flag: register the tailnet node as ephemeral"],
+  ["TAILSCALE_STORAGE_KEYS.directMode", "user config flag: route servers directly through the embedded node"],
 ])
 
 const SRC = path.join(import.meta.dirname, "..")

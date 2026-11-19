@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import * as SecureStore from "expo-secure-store"
 import i18n from "../lib/i18n/config"
+import { directTargetFromUrl } from "../lib/direct-target"
 import {
   tailscaleNative,
   TAILSCALE_STORAGE_KEYS,
@@ -18,6 +19,11 @@ export interface TailscaleConfig {
   // after going offline instead of persisting. Keep false for keyless
   // enrollments, which would need re-approval on every start.
   ephemeral: boolean
+  // Direct-connect mode: the app talks to the server URL directly and the
+  // native network stack routes registered targets through the embedded
+  // node, skipping the per-target loopback relays. Experimental; applies
+  // when the node starts.
+  directMode: boolean
 }
 
 interface TailscaleState {
@@ -38,6 +44,9 @@ interface TailscaleState {
   allowInsecureControl: boolean
   // Ephemeral node registration (see TailscaleConfig). Default false.
   ephemeral: boolean
+  // Direct-connect mode (see TailscaleConfig). Default false: every
+  // tailscale connection keeps using its per-target loopback relay.
+  directMode: boolean
   // Active loopback forward to the opencode server
   forwardId: string | null
   forwardPort: number | null
@@ -55,6 +64,10 @@ interface TailscaleState {
   // Returns the local proxy port, or null when unavailable (not configured,
   // native module missing, or start failed). Starts the node automatically.
   ensureForward: (targetUrl: string) => Promise<number | null>
+  // Direct-connect counterpart: ensure the node is connected and register
+  // targetUrl in the native allowlist. True when the target may be reached
+  // through the embedded node.
+  ensureDirectTarget: (targetUrl: string) => Promise<boolean>
   // Stop the active loopback forward, if any. Used when the app switches to a
   // connection that does not ride the embedded node.
   releaseForward: () => Promise<void>
@@ -119,6 +132,9 @@ async function doStart(): Promise<boolean> {
   if (staleForwardId) void native.stopForward(staleForwardId).catch(() => {})
   useTailscale.setState({ busy: true, error: "" })
   try {
+    // Sync the routing switch before the node comes up, so the very first
+    // request after connect already follows the chosen mode.
+    await native.setDirectMode(useTailscale.getState().directMode)
     if (authKey) {
       const status = await native.start(controlUrl, authKey, deviceName, ephemeral)
       useTailscale.setState(applyStatus(status))
@@ -174,30 +190,41 @@ async function doReleaseForward(): Promise<void> {
   useTailscale.setState({ forwardId: null, forwardPort: null, forwardTarget: null })
 }
 
-async function doEnsureForward(targetUrl: string): Promise<number | null> {
+// Shared first half of ensureForward/ensureDirectTarget: make sure the node
+// is connected, auto-starting it when configured. Returns false while an
+// enrollment is pending, during the auto-retry cooldown, or when the node
+// could not be brought up.
+async function ensureNodeConnected(): Promise<boolean> {
   const native = tailscaleNative()
-  if (!native) return null
+  if (!native) return false
   const { authKey, controlUrl } = useTailscale.getState()
   let status = await native.status().catch(() => null)
   if (!status || status.phase !== "connected") {
     // An enrollment or connect attempt is already in flight; let it finish
     // (status polling drives the UI) instead of stacking another start.
-    if (status?.phase === "connecting") return null
-    if (!authKey && !controlUrl) return null
-    if (!autoRetryAllowed(lastAutoFailAt, Date.now())) return null
+    if (status?.phase === "connecting") return false
+    if (!authKey && !controlUrl) return false
+    if (!autoRetryAllowed(lastAutoFailAt, Date.now())) return false
     const ok = await doStart()
     if (!ok) {
       lastAutoFailAt = Date.now()
-      return null
+      return false
     }
     status = await native.status().catch(() => null)
     if (!status || status.phase !== "connected") {
       // Covers a failed connect as well as a keyless enrollment still inside
-      // its approval window (which ensureForward cannot serve yet anyway).
+      // its approval window (which neither mode can serve yet anyway).
       lastAutoFailAt = Date.now()
-      return null
+      return false
     }
   }
+  return true
+}
+
+async function doEnsureForward(targetUrl: string): Promise<number | null> {
+  const native = tailscaleNative()
+  if (!native) return null
+  if (!(await ensureNodeConnected())) return null
   // Reuse the existing forward only when THIS forward is still registered. A
   // forward whose accept loop died (or that vanished with a restarted node)
   // would otherwise be served from stale store state forever; counting all
@@ -221,6 +248,24 @@ async function doEnsureForward(targetUrl: string): Promise<number | null> {
     useTailscale.setState({ error: error instanceof Error ? error.message : String(error) })
     return null
   }
+}
+
+async function doEnsureDirectTarget(targetUrl: string): Promise<boolean> {
+  const native = tailscaleNative()
+  if (!native) return false
+  if (!(await ensureNodeConnected())) return false
+  const target = directTargetFromUrl(targetUrl)
+  if (!target) return false
+  // Registered before the first request rides this connection: the native
+  // selector only routes targets that are on the allowlist. A failed
+  // registration must fail closed — returning true here would send the
+  // request straight to an untunneled URL.
+  try {
+    await native.registerDirectHost(target)
+  } catch {
+    return false
+  }
+  return true
 }
 
 function applyStatus(status: TailscaleStatus) {
@@ -247,18 +292,20 @@ export const useTailscale = create<TailscaleState>((set) => ({
   configLoaded: false,
   allowInsecureControl: false,
   ephemeral: false,
+  directMode: false,
   forwardId: null,
   forwardPort: null,
   forwardTarget: null,
   busy: false,
 
   loadConfig: async () => {
-    const [controlUrl, authKey, hostname, allowInsecureControl, ephemeral] = await Promise.all([
+    const [controlUrl, authKey, hostname, allowInsecureControl, ephemeral, directMode] = await Promise.all([
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.controlUrl),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.authKey),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.hostname),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.allowInsecureControl),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.ephemeral),
+      SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.directMode),
     ])
     set({
       controlUrl: controlUrl ?? "",
@@ -266,6 +313,7 @@ export const useTailscale = create<TailscaleState>((set) => ({
       deviceName: hostname ?? "",
       allowInsecureControl: allowInsecureControl === "true",
       ephemeral: ephemeral === "true",
+      directMode: directMode === "true",
       configLoaded: true,
     })
   },
@@ -282,12 +330,14 @@ export const useTailscale = create<TailscaleState>((set) => ({
       SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.authKey, config.authKey.trim()),
       SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.hostname, deviceName),
       SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.ephemeral, config.ephemeral ? "true" : "false"),
+      SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.directMode, config.directMode ? "true" : "false"),
     ])
     set({
       controlUrl: config.controlUrl.trim(),
       authKey: config.authKey.trim(),
       deviceName,
       ephemeral: config.ephemeral,
+      directMode: config.directMode,
     })
   },
 
@@ -308,6 +358,8 @@ export const useTailscale = create<TailscaleState>((set) => ({
   stop: () => enqueue(() => doStop()),
 
   ensureForward: (targetUrl) => enqueue(() => doEnsureForward(targetUrl)),
+
+  ensureDirectTarget: (targetUrl) => enqueue(() => doEnsureDirectTarget(targetUrl)),
 
   releaseForward: () => enqueue(() => doReleaseForward()),
 }))
