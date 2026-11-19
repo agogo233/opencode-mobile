@@ -98,6 +98,12 @@ android {
         versionName "0.5.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+        // Embedded Tailscale AAR ABIs. Default ships arm64 devices only; CI
+        // passes -PtsAbis=arm64-v8a,x86_64 so the x86_64 emulator can install
+        // the same artifact.
+        ndk {
+            abiFilters.addAll((findProperty('tsAbis') ?: 'arm64-v8a').toString().split(',').collect { it.trim() }.findAll { it })
+        }
     }
     signingConfigs {
         debug {

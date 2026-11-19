@@ -104,6 +104,8 @@ adb wait-for-device
 timeout 120 bash -c 'while [ "$(adb shell getprop sys.boot_completed 2>/dev/null)" != "1" ]; do sleep 2; done'
 ```
 
+ABI note: committed Gradle config ships arm64-v8a only (`tsAbis` gradle property, default `arm64-v8a`). Building for an x86_64 emulator requires `-PtsAbis=arm64-v8a,x86_64` (CI injects this for the CUA smoke test).
+
 SDK location: `/Volumes/Dzianis-3/macbook2020/android-sdk` (API 34, arm64-v8a system image).
 AVD location: `/Volumes/Dzianis-3/macbook2020/android-avd`.
 Gradle cache: `/Volumes/Dzianis-3/macbook2020/gradle-cache` (or symlink from `/Volumes/GradleCache/gradle-home`).

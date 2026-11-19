@@ -112,16 +112,16 @@ jobs:
             echo "Signing: debug keystore (no release signing secrets)"
           fi
 
-      - name: Build arm64-v8a APK
+      - name: Build release APK (arm64-v8a + x86_64 for CI)
         working-directory: android
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a -PtsAbis=arm64-v8a,x86_64
 
       - name: Rename artifact
-        run: cp android/app/build/outputs/apk/release/app-release.apk app-release-arm64-v8a.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk app-release-ci.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
           retention-days: 7
-          name: app-release-arm64-v8a
-          path: app-release-arm64-v8a.apk
+          name: app-release-ci
+          path: app-release-ci.apk
