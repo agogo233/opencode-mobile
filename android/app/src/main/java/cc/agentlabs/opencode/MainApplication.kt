@@ -45,11 +45,12 @@ class MainApplication : Application(), ReactApplication {
     // Direct-connect mode: route tailnet destinations through the embedded
     // tsnet SOCKS5 proxy. Applies to every RN/expo OkHttp client built after
     // this point; the selector falls back to direct when the proxy is off.
-    // The RN 0.81 factory is a no-arg Function0, so the default client is
-    // re-created via createClient() to keep the stock timeouts/interceptors.
+    // The RN 0.81 factory is a no-arg Function0 consulted by createClient(),
+    // so the lambda MUST build from createClientBuilder() instead — calling
+    // createClient() here recurses into this factory forever and crashes the
+    // app on startup (StackOverflowError).
     OkHttpClientProvider.setOkHttpClientFactory {
-      OkHttpClientProvider.createClient()
-        .newBuilder()
+      OkHttpClientProvider.createClientBuilder(applicationContext)
         .proxySelector(TailscaleProxySelector())
         .build()
     }
