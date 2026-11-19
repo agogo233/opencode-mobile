@@ -45,8 +45,13 @@ class MainApplication : Application(), ReactApplication {
     // Direct-connect mode: route tailnet destinations through the embedded
     // tsnet SOCKS5 proxy. Applies to every RN/expo OkHttp client built after
     // this point; the selector falls back to direct when the proxy is off.
-    OkHttpClientProvider.setOkHttpClientFactory { client ->
-      client.newBuilder().proxySelector(TailscaleProxySelector()).build()
+    // The RN 0.81 factory is a no-arg Function0, so the default client is
+    // re-created via createClient() to keep the stock timeouts/interceptors.
+    OkHttpClientProvider.setOkHttpClientFactory {
+      OkHttpClientProvider.createClient()
+        .newBuilder()
+        .proxySelector(TailscaleProxySelector())
+        .build()
     }
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
