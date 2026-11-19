@@ -289,9 +289,20 @@ func (f *Forwarder) StartForward(remoteHost string, remotePort, localPort int) (
 	}
 	item := &forward{Forward: result, listener: listener, cancel: cancel, done: make(chan struct{})}
 	f.forwardMu.Lock()
+	retired := f.forwards[result.ID]
 	f.forwards[result.ID] = item
 	f.forwardMu.Unlock()
 	f.mu.Unlock()
+
+	// Same-ID replacement (an explicit local port rebound while the previous
+	// entry was still winding down): retire the old pipe so no listener or
+	// accept loop survives outside the map. The conditional delete in
+	// acceptLoop keeps the exiting loop from removing the new entry.
+	if retired != nil {
+		retired.cancel()
+		_ = retired.listener.Close()
+		<-retired.done
+	}
 
 	go f.acceptLoop(ctx, server, item)
 	return result, nil
@@ -327,7 +338,11 @@ func (f *Forwarder) acceptLoop(ctx context.Context, server *tsnet.Server, item *
 	defer func() {
 		_ = item.listener.Close()
 		f.forwardMu.Lock()
-		delete(f.forwards, item.ID)
+		// A same-ID replacement may already have installed a new pipe under
+		// this ID while this loop was exiting; only remove our own entry.
+		if f.forwards[item.ID] == item {
+			delete(f.forwards, item.ID)
+		}
 		f.forwardMu.Unlock()
 	}()
 

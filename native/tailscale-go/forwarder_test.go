@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"tailscale.com/tsnet"
 )
 
 func TestNewState(t *testing.T) {
@@ -119,6 +121,63 @@ func TestStartForwardValidation(t *testing.T) {
 				t.Fatal("StartForward accepted invalid input")
 			}
 		})
+	}
+}
+
+// A same-ID entry that is still registered while its accept loop has already
+// exited (the replacement race window) must be retired by the next
+// StartForward, not orphaned outside the map.
+func TestStartForwardRetiresReplacedSameID(t *testing.T) {
+	f := New()
+	f.mu.Lock()
+	f.server = &tsnet.Server{}
+	f.phase = "connected"
+	f.mu.Unlock()
+
+	const localPort = 45971
+	first, err := f.StartForward("100.64.0.1", 4096, localPort)
+	if err != nil {
+		t.Fatalf("StartForward() error = %v", err)
+	}
+	f.forwardMu.RLock()
+	retired := f.forwards[first.ID]
+	f.forwardMu.RUnlock()
+	if retired == nil {
+		t.Fatal("forward was not registered")
+	}
+	if err := f.StopForward(first.ID); err != nil {
+		t.Fatalf("StopForward() error = %v", err)
+	}
+	select {
+	case <-retired.done:
+	default:
+		t.Fatal("retired forward loop did not exit")
+	}
+	// Re-insert the retired entry to simulate the race window.
+	f.forwardMu.Lock()
+	f.forwards[first.ID] = retired
+	f.forwardMu.Unlock()
+
+	second, err := f.StartForward("100.64.0.1", 4096, localPort)
+	if err != nil {
+		t.Fatalf("replacement StartForward() error = %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("replacement ID = %q, want %q", second.ID, first.ID)
+	}
+	f.forwardMu.RLock()
+	_, retiredStillThere := f.forwards[first.ID]
+	count := len(f.forwards)
+	entry := f.forwards[first.ID]
+	f.forwardMu.RUnlock()
+	if count != 1 {
+		t.Fatalf("forward count = %d, want 1", count)
+	}
+	if !retiredStillThere || entry == retired {
+		t.Fatal("retired entry was not replaced by the new pipe")
+	}
+	if got := f.GetForwardLocalPort(first.ID); got != localPort {
+		t.Fatalf("local port = %d, want %d", got, localPort)
 	}
 }
 
