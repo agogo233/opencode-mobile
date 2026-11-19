@@ -58,6 +58,7 @@
         "retry": "Retry",
         "starting": "Starting…",
         "stopping": "Stopping…",
+        "cancel": "Cancel",
         "notConfiguredTitle": "Tailscale is not set up",
         "notConfigured": "Enter your auth key or control server URL first.",
         "loginPendingTitle": "Approval required",

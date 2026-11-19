@@ -83,7 +83,9 @@ export default function TailscaleSettingsScreen() {
     })
 
   const handleToggle = async () => {
-    if (connected) {
+    if (connected || phase === "connecting") {
+      // Connecting covers a pending keyless enrollment: cancel it instead of
+      // stacking another start, which would reset the approval window.
       await stop()
       return
     }
@@ -120,14 +122,16 @@ export default function TailscaleSettingsScreen() {
   }
 
   const buttonLabel = busy
-    ? connected
+    ? connected || phase === "connecting"
       ? t("settings.tailscale.page.stopping")
       : t("settings.tailscale.page.starting")
     : connected
       ? t("settings.tailscale.page.stop")
-      : phase === "error"
-        ? t("settings.tailscale.page.retry")
-        : t("settings.tailscale.page.start")
+      : phase === "connecting"
+        ? t("settings.tailscale.page.cancel")
+        : phase === "error"
+          ? t("settings.tailscale.page.retry")
+          : t("settings.tailscale.page.start")
 
   return (
     <KeyboardAvoidingView
@@ -253,7 +257,11 @@ export default function TailscaleSettingsScreen() {
 
         {/* Primary action */}
         <TouchableOpacity
-          style={[styles.actionButton, isDark && styles.actionButtonDark, connected && styles.actionButtonStop]}
+          style={[
+            styles.actionButton,
+            isDark && styles.actionButtonDark,
+            (connected || phase === "connecting") && styles.actionButtonStop,
+          ]}
           onPress={handleToggle}
           disabled={busy}
         >
@@ -261,7 +269,7 @@ export default function TailscaleSettingsScreen() {
             style={[
               styles.actionButtonText,
               isDark && styles.actionButtonTextDark,
-              connected && styles.actionButtonTextStop,
+              (connected || phase === "connecting") && styles.actionButtonTextStop,
             ]}
           >
             {buttonLabel}

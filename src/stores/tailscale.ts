@@ -7,6 +7,7 @@ import {
   type TailscalePhase,
   type TailscaleStatus,
 } from "../lib/tailscale"
+import { canStart } from "../lib/tailscale-policy"
 
 export interface TailscaleConfig {
   controlUrl: string
@@ -76,6 +77,10 @@ async function doStart(): Promise<boolean> {
     useTailscale.setState({ phase: "error", error: i18n.t("settings.tailscale.page.errors.moduleUnavailable") })
     return false
   }
+  // An enrollment or connect attempt is already in flight; a second start
+  // would tear it down and reset the approval window. Status polling drives
+  // the UI instead.
+  if (!canStart(useTailscale.getState().phase)) return false
   const { controlUrl, authKey, deviceName } = useTailscale.getState()
   if (!authKey && !controlUrl) {
     useTailscale.setState({ phase: "error", error: i18n.t("settings.tailscale.page.errors.configRequired") })

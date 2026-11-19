@@ -58,6 +58,7 @@
         "retry": "重试",
         "starting": "启动中…",
         "stopping": "停止中…",
+        "cancel": "取消",
         "notConfiguredTitle": "Tailscale 尚未配置",
         "notConfigured": "请先填写 Auth Key 或控制服务器地址。",
         "loginPendingTitle": "等待授权",
