@@ -177,13 +177,18 @@ async function doEnsureForward(targetUrl: string): Promise<number | null> {
     status = await native.status().catch(() => null)
     if (!status || status.phase !== "connected") return null
   }
-  // Reuse the existing forward only when the node still reports it alive. A
+  // Reuse the existing forward only when THIS forward is still registered. A
   // forward whose accept loop died (or that vanished with a restarted node)
-  // would otherwise be served from stale store state forever.
-  const forwardAlive = !!status && status.phase === "connected" && status.forwardCount > 0
+  // would otherwise be served from stale store state forever; counting all
+  // forwards is not enough when unrelated pipes survive.
   const state = useTailscale.getState()
-  if (state.forwardTarget === targetUrl && state.forwardPort && forwardAlive) return state.forwardPort
-  if (state.forwardId) await native.stopForward(state.forwardId).catch(() => {})
+  if (state.forwardTarget === targetUrl && state.forwardPort && state.forwardId) {
+    const forwardAlive = await native.isForwardAlive(state.forwardId).catch(() => false)
+    if (forwardAlive) return state.forwardPort
+  }
+  // The store owns the node's only forward: retire everything (including any
+  // leftover from a dev-time reload) before opening the one we need.
+  await native.stopAllForwards().catch(() => {})
   try {
     const forward = await native.forward(targetUrl)
     useTailscale.setState({ forwardId: forward.id, forwardPort: forward.port, forwardTarget: targetUrl })

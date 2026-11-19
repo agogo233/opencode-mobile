@@ -27,6 +27,10 @@ interface TailscaleNativeModule {
   status(): Promise<TailscaleStatus>
   forward(targetUrl: string): Promise<TailscaleForward>
   stopForward(id: string): Promise<void>
+  // True when the forward with this exact ID is still registered natively.
+  isForwardAlive(id: string): Promise<boolean>
+  // Stops every native forward; the store owns the node's only forward.
+  stopAllForwards(): Promise<void>
 }
 
 export function tailscaleNative(): TailscaleNativeModule | null {

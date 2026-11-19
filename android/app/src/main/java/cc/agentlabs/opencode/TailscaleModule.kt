@@ -173,6 +173,34 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    // Precise liveness check: the forward with this exact ID is still
+    // registered (and therefore its loopback port is being served).
+    @ReactMethod
+    fun isForwardAlive(id: String, promise: Promise) {
+        dispatch(promise) {
+            try {
+                promise.resolve(forwarder.getForwardLocalPort(id) != 0L)
+            } catch (e: Exception) {
+                promise.reject("TS_FORWARD_ALIVE", e.message, e)
+            }
+        }
+    }
+
+    // The JS store owns the node's only forward; this lets it retire
+    // everything (including leftovers from a dev-time reload) before opening
+    // the one it needs.
+    @ReactMethod
+    fun stopAllForwards(promise: Promise) {
+        dispatch(promise) {
+            try {
+                forwarder.stopAll()
+                promise.resolve(null)
+            } catch (e: Exception) {
+                promise.reject("TS_STOP_ALL", e.message, e)
+            }
+        }
+    }
+
     private fun statusMap(): WritableNativeMap {
         // Use the primitive getters: gomobile struct-returning methods are not
         // usable from Kotlin here, and these map 1:1 onto the State fields.
