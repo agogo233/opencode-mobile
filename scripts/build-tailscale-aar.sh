@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the embedded Tailscale forwarder AAR consumed by android/app.
 #
-# Requirements: Go 1.23+ (GO env var overrides the binary), gomobile/gobind
+# Requirements: Go 1.27+ (GO env var overrides the binary), gomobile/gobind
 # (installed by this script), a JDK with javac on PATH, and the Android SDK
 # with NDK 27.2.12479018 (ANDROID_NDK_HOME / ANDROID_NDK_ROOT).
 #
@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 GO_BIN="${GO:-go}"
-GOMOBILE_VERSION="v0.0.0-20240806205939-81131f6468ab"
+GOMOBILE_VERSION="v0.0.0-20261117202452-47699113848a"
 
 command -v "$GO_BIN" >/dev/null 2>&1 || { echo "Go 1.27+ is required (set GO=/path/to/go to override)"; exit 1; }
 command -v javac >/dev/null 2>&1 || { echo "javac must be on PATH (install a JDK)"; exit 1; }
