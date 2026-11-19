@@ -108,9 +108,20 @@ func (f *Forwarder) startHTTPForwardID(targetURL string, port, localPort int) (s
 		done:     make(chan struct{}),
 	}
 	f.forwardMu.Lock()
+	retired := f.forwards[item.ID]
 	f.forwards[item.ID] = item
 	f.forwardMu.Unlock()
 	f.mu.Unlock()
+
+	// Same-ID replacement (an explicit local port rebound while the previous
+	// entry was still winding down): retire the old pipe so no listener or
+	// serving goroutine survives outside the map. The conditional delete in
+	// the serve goroutine keeps the exiting one from removing the new entry.
+	if retired != nil {
+		retired.cancel()
+		_ = retired.listener.Close()
+		<-retired.done
+	}
 
 	srv := &http.Server{Handler: proxy}
 	go func() {
@@ -118,7 +129,9 @@ func (f *Forwarder) startHTTPForwardID(targetURL string, port, localPort int) (s
 		defer func() {
 			_ = listener.Close()
 			f.forwardMu.Lock()
-			delete(f.forwards, item.ID)
+			if f.forwards[item.ID] == item {
+				delete(f.forwards, item.ID)
+			}
 			f.forwardMu.Unlock()
 		}()
 		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {

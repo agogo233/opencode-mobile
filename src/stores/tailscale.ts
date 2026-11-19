@@ -202,8 +202,11 @@ async function doEnsureForward(targetUrl: string): Promise<number | null> {
     if (forwardAlive) return state.forwardPort
   }
   // The store owns the node's only forward: retire everything (including any
-  // leftover from a dev-time reload) before opening the one we need.
+  // leftover from a dev-time reload) before opening the one we need, and drop
+  // the stale ids from the state so a failed open cannot leave a dead port
+  // behind.
   await native.stopAllForwards().catch(() => {})
+  useTailscale.setState({ forwardId: null, forwardPort: null, forwardTarget: null })
   try {
     const forward = await native.forward(targetUrl)
     useTailscale.setState({ forwardId: forward.id, forwardPort: forward.port, forwardTarget: targetUrl })

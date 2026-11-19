@@ -129,6 +129,9 @@ func TestStartForwardValidation(t *testing.T) {
 // StartForward, not orphaned outside the map.
 func TestStartForwardRetiresReplacedSameID(t *testing.T) {
 	f := New()
+	// Stop the replacement forward when the test ends; Close is overkill here
+	// (the fake server never started) and StopAll reclaims the listener.
+	t.Cleanup(f.StopAll)
 	f.mu.Lock()
 	f.server = &tsnet.Server{}
 	f.phase = "connected"
