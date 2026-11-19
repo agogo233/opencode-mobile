@@ -35,14 +35,6 @@ on:
         description: "Natural-language test query (enables --query mode, overrides scenario)"
         required: false
         default: ""
-  push:
-    branches: [main]
-    tags: ["v*"]
-    paths:
-      - "scripts/android-cua-smoke.py"
-      - "src/**"
-      - "app/**"
-      - ".github/workflows/cua-smoke.yml"
 
 jobs:
   cua-test:
