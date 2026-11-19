@@ -32,13 +32,14 @@ export default function TailscaleSettingsScreen() {
   const isDark = colorScheme === "dark"
   const { t } = useTranslation()
 
-  const { phase, ipv4, ipv6, error, loginUrl, controlUrl, authKey, deviceName, busy, allowInsecureControl, ephemeral, loadConfig, saveConfig, setAllowInsecureControl, start, stop, refresh } =
+  const { phase, ipv4, ipv6, error, loginUrl, controlUrl, authKey, deviceName, busy, allowInsecureControl, ephemeral, directMode, loadConfig, saveConfig, setAllowInsecureControl, start, stop, refresh } =
     useTailscale()
 
   const [controlUrlInput, setControlUrlInput] = useState("")
   const [authKeyInput, setAuthKeyInput] = useState("")
   const [hostnameInput, setHostnameInput] = useState("")
   const [ephemeralInput, setEphemeralInput] = useState(false)
+  const [directModeInput, setDirectModeInput] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [hydrated, setHydrated] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -58,8 +59,9 @@ export default function TailscaleSettingsScreen() {
     setAuthKeyInput(authKey)
     setHostnameInput(deviceName)
     setEphemeralInput(ephemeral)
+    setDirectModeInput(directMode)
     setHydrated(true)
-  }, [controlUrl, authKey, deviceName, ephemeral, hydrated])
+  }, [controlUrl, authKey, deviceName, ephemeral, directMode, hydrated])
 
   // Cheap status poll while the page is open (the Go side has no event bus).
   useEffect(() => {
@@ -113,6 +115,7 @@ export default function TailscaleSettingsScreen() {
       authKey: authKeyInput,
       hostname: hostnameInput,
       ephemeral: ephemeralInput,
+      directMode: directModeInput,
     })
     await start()
   }
@@ -303,6 +306,35 @@ export default function TailscaleSettingsScreen() {
           )}
         </View>
 
+        {/* Connection mode */}
+        <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+          {t("settings.tailscale.page.connectionModeTitle")}
+        </Text>
+        <View style={[styles.card, isDark && styles.cardDark]}>
+          <View style={styles.modeSeg}>
+            <TouchableOpacity
+              style={[styles.modeOpt, !directModeInput && styles.modeOptOn]}
+              onPress={() => setDirectModeInput(false)}
+            >
+              <Text style={[styles.modeOptText, !directModeInput && styles.modeOptTextOn]}>
+                {t("settings.tailscale.page.modeRelay")}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeOpt, directModeInput && styles.modeOptOn]}
+              onPress={() => setDirectModeInput(true)}
+            >
+              <Text style={[styles.modeOptText, directModeInput && styles.modeOptTextOn]}>
+                {t("settings.tailscale.page.modeDirect")}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={[styles.hint, isDark && styles.hintDark]}>
+            {directModeInput ? t("settings.tailscale.page.modeDirectDesc") : t("settings.tailscale.page.modeRelayDesc")}
+          </Text>
+          <Text style={[styles.hint, isDark && styles.hintDark]}>{t("settings.tailscale.page.modeHint")}</Text>
+        </View>
+
         {/* Primary action */}
         <TouchableOpacity
           style={[
@@ -465,6 +497,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
+  },
+  modeSeg: {
+    flexDirection: "row",
+    backgroundColor: "#e5e7eb",
+    borderRadius: 10,
+    padding: 3,
+    gap: 3,
+  },
+  modeOpt: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 9,
+    borderRadius: 8,
+  },
+  modeOptOn: {
+    backgroundColor: "#3b82f6",
+  },
+  modeOptText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#666666",
+  },
+  modeOptTextOn: {
+    color: "#ffffff",
   },
   hint: {
     fontSize: 12,
