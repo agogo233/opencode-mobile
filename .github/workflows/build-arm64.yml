@@ -43,7 +43,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.27"
 
       - name: Go tests (embedded forwarder)
         working-directory: native/tailscale-go

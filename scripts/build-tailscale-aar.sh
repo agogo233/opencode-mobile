@@ -16,7 +16,7 @@ cd "$(dirname "$0")/.."
 GO_BIN="${GO:-go}"
 GOMOBILE_VERSION="v0.0.0-20240806205939-81131f6468ab"
 
-command -v "$GO_BIN" >/dev/null 2>&1 || { echo "Go 1.23+ is required (set GO=/path/to/go to override)"; exit 1; }
+command -v "$GO_BIN" >/dev/null 2>&1 || { echo "Go 1.27+ is required (set GO=/path/to/go to override)"; exit 1; }
 command -v javac >/dev/null 2>&1 || { echo "javac must be on PATH (install a JDK)"; exit 1; }
 if [[ -z "${ANDROID_NDK_HOME:-}" && -z "${ANDROID_NDK_ROOT:-}" ]]; then
   echo "ANDROID_NDK_HOME (or ANDROID_NDK_ROOT) must point at NDK 27.2.12479018 or newer"
