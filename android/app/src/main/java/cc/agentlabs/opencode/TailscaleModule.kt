@@ -113,11 +113,10 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     @ReactMethod
     fun start(controlUrl: String, authKey: String, hostname: String, ephemeral: Boolean, promise: Promise) {
         val task: () -> Unit = {
-            if (destroyed) {
-                promise.reject("TS_SHUTDOWN", "Tailscale module destroyed", null)
-                return@task
-            }
             try {
+                // A bare return label is not available on a function-type
+                // lambda, so the shutdown check aborts via the shared catch.
+                if (destroyed) throw IllegalStateException("Tailscale module destroyed")
                 // Interface info must be supplied before tsnet boots: Android
                 // denies Go's netlink interface enumeration on API 30+.
                 injectNetworkInterfaces()
