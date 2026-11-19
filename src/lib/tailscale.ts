@@ -22,7 +22,7 @@ export interface TailscaleForward {
 }
 
 interface TailscaleNativeModule {
-  start(controlUrl: string, authKey: string, hostname: string): Promise<TailscaleStatus>
+  start(controlUrl: string, authKey: string, hostname: string, ephemeral: boolean): Promise<TailscaleStatus>
   stop(): Promise<TailscaleStatus>
   status(): Promise<TailscaleStatus>
   forward(targetUrl: string): Promise<TailscaleForward>
@@ -44,4 +44,5 @@ export const TAILSCALE_STORAGE_KEYS = {
   authKey: "opencode_ts_auth_key",
   hostname: "opencode_ts_hostname",
   allowInsecureControl: "opencode_ts_allow_insecure_control",
+  ephemeral: "opencode_ts_ephemeral",
 } as const

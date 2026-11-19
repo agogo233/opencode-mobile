@@ -70,6 +70,8 @@
         "insecureControlBlockedTitle": "明文控制服务器已被禁用",
         "insecureControlBlockedMessage": "控制服务器地址使用 http://，Auth Key 将明文传输。请将服务器切换为 https://；如确需明文连接，可长按“身份”标题显式允许。",
         "allowInsecureControl": "允许明文控制服务器（不安全）",
+        "ephemeralLabel": "临时节点",
+        "ephemeralHint": "离线后不久自动从 tailnet 注销本设备。推荐配合 Auth Key 使用；无密钥入网每次启动都需重新审批。",
         "help": "首次连接可使用 Auth Key，也可在控制服务器网页上交互式确认（Headscale 0.23+）。节点身份会保存在本机，之后启动会自动重连。到 opencode 服务器的流量经由你的 tailnet 端到端加密。",
         "errors": {
           "configRequired": "启动 Tailscale 需要先填写 Auth Key 或控制服务器地址。",

@@ -235,3 +235,18 @@ func TestApplyAndroidDirs(t *testing.T) {
 		}
 	}
 }
+
+func TestSetEphemeral(t *testing.T) {
+	f := New()
+	if f.ephemeral {
+		t.Fatal("new forwarder is ephemeral by default")
+	}
+	f.SetEphemeral(true)
+	if !f.ephemeral {
+		t.Fatal("SetEphemeral(true) did not stick")
+	}
+	f.SetEphemeral(false)
+	if f.ephemeral {
+		t.Fatal("SetEphemeral(false) did not stick")
+	}
+}

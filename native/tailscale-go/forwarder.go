@@ -65,6 +65,7 @@ type Forwarder struct {
 	controlURL string
 	hostname   string
 	stateDir   string
+	ephemeral  bool
 	phase      string
 	lastErr    string
 	loginURL   string
@@ -131,6 +132,16 @@ func (f *Forwarder) ConfigureControl(authKey, controlURL, hostname, stateDir str
 	return nil
 }
 
+// SetEphemeral marks the node as ephemeral: it deregisters from the tailnet
+// shortly after going offline instead of persisting as a device. Must be
+// called before Connect. Keep this off for keyless enrollments — an expired
+// ephemeral node has to re-approve on every start.
+func (f *Forwarder) SetEphemeral(enabled bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ephemeral = enabled
+}
+
 // Connect starts tsnet and waits for it to become usable. It blocks the
 // calling thread until the node is connected or the attempt fails. A
 // first-time keyless enrollment gets a long window: the user must open the
@@ -175,6 +186,7 @@ func (f *Forwarder) Connect() (err error) {
 		ControlURL: f.controlURL,
 		Hostname:   f.hostname,
 		Dir:        f.stateDir,
+		Ephemeral:  f.ephemeral,
 		Logf:       f.logf,
 		UserLogf:   f.logf,
 	}
@@ -185,7 +197,9 @@ func (f *Forwarder) Connect() (err error) {
 	f.lastErr = ""
 	f.loginURL = ""
 	timeout := defaultConnectTimeout
-	if f.authKey == "" && !f.HasPersistedLogin(f.stateDir) {
+	// An ephemeral node does not survive going offline, so a persisted marker
+	// says nothing about the current enrollment: always allow the long window.
+	if f.authKey == "" && (f.ephemeral || !f.HasPersistedLogin(f.stateDir)) {
 		timeout = enrollmentConnectTimeout
 	}
 	f.mu.Unlock()

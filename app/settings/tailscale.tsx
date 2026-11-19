@@ -32,12 +32,13 @@ export default function TailscaleSettingsScreen() {
   const isDark = colorScheme === "dark"
   const { t } = useTranslation()
 
-  const { phase, ipv4, ipv6, error, loginUrl, controlUrl, authKey, deviceName, busy, allowInsecureControl, loadConfig, saveConfig, setAllowInsecureControl, start, stop, refresh } =
+  const { phase, ipv4, ipv6, error, loginUrl, controlUrl, authKey, deviceName, busy, allowInsecureControl, ephemeral, loadConfig, saveConfig, setAllowInsecureControl, start, stop, refresh } =
     useTailscale()
 
   const [controlUrlInput, setControlUrlInput] = useState("")
   const [authKeyInput, setAuthKeyInput] = useState("")
   const [hostnameInput, setHostnameInput] = useState("")
+  const [ephemeralInput, setEphemeralInput] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [hydrated, setHydrated] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -56,8 +57,9 @@ export default function TailscaleSettingsScreen() {
     setControlUrlInput(controlUrl)
     setAuthKeyInput(authKey)
     setHostnameInput(deviceName)
+    setEphemeralInput(ephemeral)
     setHydrated(true)
-  }, [controlUrl, authKey, deviceName, hydrated])
+  }, [controlUrl, authKey, deviceName, ephemeral, hydrated])
 
   // Cheap status poll while the page is open (the Go side has no event bus).
   useEffect(() => {
@@ -106,7 +108,12 @@ export default function TailscaleSettingsScreen() {
       return
     }
     if (decision === "confirm" && !(await confirmInsecureControl())) return
-    await saveConfig({ controlUrl: controlUrlInput, authKey: authKeyInput, hostname: hostnameInput })
+    await saveConfig({
+      controlUrl: controlUrlInput,
+      authKey: authKeyInput,
+      hostname: hostnameInput,
+      ephemeral: ephemeralInput,
+    })
     await start()
   }
 
@@ -270,6 +277,14 @@ export default function TailscaleSettingsScreen() {
             autoCorrect={false}
           />
           <Text style={[styles.hint, isDark && styles.hintDark]}>{t("settings.tailscale.page.hostnameHint")}</Text>
+
+          <View style={styles.insecureRow}>
+            <Text style={[styles.label, isDark && styles.labelDark]}>
+              {t("settings.tailscale.page.ephemeralLabel")}
+            </Text>
+            <Switch value={ephemeralInput} onValueChange={setEphemeralInput} />
+          </View>
+          <Text style={[styles.hint, isDark && styles.hintDark]}>{t("settings.tailscale.page.ephemeralHint")}</Text>
 
           {showInsecureToggle && (
             <View style={styles.insecureRow}>

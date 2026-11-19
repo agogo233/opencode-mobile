@@ -14,6 +14,10 @@ export interface TailscaleConfig {
   controlUrl: string
   authKey: string
   hostname: string
+  // Register as an ephemeral node: the device leaves the tailnet shortly
+  // after going offline instead of persisting. Keep false for keyless
+  // enrollments, which would need re-approval on every start.
+  ephemeral: boolean
 }
 
 interface TailscaleState {
@@ -32,6 +36,8 @@ interface TailscaleState {
   // Escape hatch for plaintext (http://) control servers. Default false:
   // insecure URLs are rejected outright until the user opts in.
   allowInsecureControl: boolean
+  // Ephemeral node registration (see TailscaleConfig). Default false.
+  ephemeral: boolean
   // Active loopback forward to the opencode server
   forwardId: string | null
   forwardPort: number | null
@@ -92,7 +98,7 @@ async function doStart(): Promise<boolean> {
   // would tear it down and reset the approval window. Status polling drives
   // the UI instead.
   if (!canStart(useTailscale.getState().phase)) return false
-  const { controlUrl, authKey, deviceName, allowInsecureControl } = useTailscale.getState()
+  const { controlUrl, authKey, deviceName, allowInsecureControl, ephemeral } = useTailscale.getState()
   if (!authKey && !controlUrl) {
     useTailscale.setState({ phase: "error", error: i18n.t("settings.tailscale.page.errors.configRequired") })
     return false
@@ -114,7 +120,7 @@ async function doStart(): Promise<boolean> {
   useTailscale.setState({ busy: true, error: "" })
   try {
     if (authKey) {
-      const status = await native.start(controlUrl, authKey, deviceName)
+      const status = await native.start(controlUrl, authKey, deviceName, ephemeral)
       useTailscale.setState(applyStatus(status))
       return status.phase === "connected"
     }
@@ -126,7 +132,7 @@ async function doStart(): Promise<boolean> {
     // first native call even lands.
     useTailscale.setState({ phase: "connecting", error: "" })
     void native
-      .start(controlUrl, "", deviceName)
+      .start(controlUrl, "", deviceName, ephemeral)
       .then((status) => {
         useTailscale.setState(applyStatus(status))
       })
@@ -240,23 +246,26 @@ export const useTailscale = create<TailscaleState>((set) => ({
   deviceName: "",
   configLoaded: false,
   allowInsecureControl: false,
+  ephemeral: false,
   forwardId: null,
   forwardPort: null,
   forwardTarget: null,
   busy: false,
 
   loadConfig: async () => {
-    const [controlUrl, authKey, hostname, allowInsecureControl] = await Promise.all([
+    const [controlUrl, authKey, hostname, allowInsecureControl, ephemeral] = await Promise.all([
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.controlUrl),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.authKey),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.hostname),
       SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.allowInsecureControl),
+      SecureStore.getItemAsync(TAILSCALE_STORAGE_KEYS.ephemeral),
     ])
     set({
       controlUrl: controlUrl ?? "",
       authKey: authKey ?? "",
       deviceName: hostname ?? "",
       allowInsecureControl: allowInsecureControl === "true",
+      ephemeral: ephemeral === "true",
       configLoaded: true,
     })
   },
@@ -272,8 +281,14 @@ export const useTailscale = create<TailscaleState>((set) => ({
       SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.controlUrl, config.controlUrl.trim()),
       SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.authKey, config.authKey.trim()),
       SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.hostname, deviceName),
+      SecureStore.setItemAsync(TAILSCALE_STORAGE_KEYS.ephemeral, config.ephemeral ? "true" : "false"),
     ])
-    set({ controlUrl: config.controlUrl.trim(), authKey: config.authKey.trim(), deviceName })
+    set({
+      controlUrl: config.controlUrl.trim(),
+      authKey: config.authKey.trim(),
+      deviceName,
+      ephemeral: config.ephemeral,
+    })
   },
 
   refresh: async () => {

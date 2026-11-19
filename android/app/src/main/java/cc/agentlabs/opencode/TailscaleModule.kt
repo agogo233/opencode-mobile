@@ -50,6 +50,9 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     @Volatile
     private var startedHostname: String? = null
 
+    @Volatile
+    private var startedEphemeral: Boolean = false
+
     override fun getName() = "Tailscale"
 
     override fun onCatalystInstanceDestroy() {
@@ -67,6 +70,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
         startedControlUrl = null
         startedAuthKey = null
         startedHostname = null
+        startedEphemeral = false
     }
 
     // Runs a task on the bridge executor. After the catalyst instance is
@@ -82,7 +86,7 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun start(controlUrl: String, authKey: String, hostname: String, promise: Promise) {
+    fun start(controlUrl: String, authKey: String, hostname: String, ephemeral: Boolean, promise: Promise) {
         val task: () -> Unit = {
             try {
                 // Interface info must be supplied before tsnet boots: Android
@@ -92,14 +96,17 @@ class TailscaleModule(private val reactContext: ReactApplicationContext) :
                 val sameIdentity = forwarder.getPhase() == "connected" &&
                     startedControlUrl == controlUrl &&
                     startedAuthKey == authKey &&
-                    startedHostname == hostname
+                    startedHostname == hostname &&
+                    startedEphemeral == ephemeral
                 if (!sameIdentity) {
                     forwarder.close() // idempotent reset so a new config always applies
                     val stateDir = File(reactContext.filesDir, "tailscale").absolutePath
                     forwarder.configureControl(authKey, controlUrl, hostname, stateDir)
+                    forwarder.setEphemeral(ephemeral)
                     startedControlUrl = controlUrl
                     startedAuthKey = authKey
                     startedHostname = hostname
+                    startedEphemeral = ephemeral
                     forwarder.connect()
                 }
                 promise.resolve(statusMap())
