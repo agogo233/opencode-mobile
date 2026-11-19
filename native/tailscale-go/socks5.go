@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,7 @@ const (
 	socksAuthNoAcceptable  = 0xFF
 	socksCmdConnect        = 1
 	socksRepSuccess        = 0
+	socksRepNotAllowed     = 2
 	socksRepDialFailed     = 5
 	socksRepCmdUnsupported = 7
 	// Handshake-bound cap so a stuck client cannot pin a goroutine forever.
@@ -34,6 +36,9 @@ type socksProxy struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	dial     dialFunc
+	// allowed reports whether a target may be dialed (direct-connect
+	// allowlist). nil allows everything (tests).
+	allowed func(target string) bool
 }
 
 // StartSocks5 binds the loopback SOCKS5 proxy. A localPort of zero selects an
@@ -43,26 +48,30 @@ func (f *Forwarder) StartSocks5(localPort int) (int, error) {
 	if localPort < 0 || localPort > 65535 {
 		return 0, fmt.Errorf("invalid local port %d", localPort)
 	}
+	// Hold f.mu across the liveness check, listener creation, and install so a
+	// concurrent Close cannot slip in between and leak the listener (same
+	// discipline as StartForward).
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	server := f.server
 	// Mirror StartForward: only a fully connected node may serve traffic.
 	if server == nil || f.phase != "connected" {
-		f.mu.Unlock()
 		return 0, errors.New("tsnet is not connected")
 	}
-	f.mu.Unlock()
-	return f.startSocks5WithDialer(server.Dial, localPort)
+	return f.startSocks5Locked(server.Dial, f.socksTargetAllowed, localPort)
 }
 
-// startSocks5WithDialer is the testable core: it binds the proxy with an
-// arbitrary dial function instead of requiring a live tsnet server.
-func (f *Forwarder) startSocks5WithDialer(dial dialFunc, localPort int) (int, error) {
+// startSocks5Locked is the testable core: it binds the proxy with an
+// arbitrary dial function and target filter instead of requiring a live
+// tsnet server. Callers must hold f.mu; tests run single-threaded and call
+// it directly (allowed = nil means every target is allowed).
+func (f *Forwarder) startSocks5Locked(dial dialFunc, allowed func(target string) bool, localPort int) (int, error) {
 	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
 	if err != nil {
 		return 0, fmt.Errorf("listen socks5 on local port %d: %w", localPort, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	proxy := &socksProxy{listener: listener, cancel: cancel, done: make(chan struct{}), dial: dial}
+	proxy := &socksProxy{listener: listener, cancel: cancel, done: make(chan struct{}), dial: dial, allowed: allowed}
 
 	f.forwardMu.Lock()
 	previous := f.socks
@@ -95,6 +104,52 @@ func (f *Forwarder) GetSocksPort() int {
 		return f.socks.listener.Addr().(*net.TCPAddr).Port
 	}
 	return 0
+}
+
+// AllowSocksTarget registers a "host:port" target the direct-connect proxy
+// may dial. Unregistered targets are refused (connection not allowed), so the
+// proxy's exposure matches the per-target relay mode.
+func (f *Forwarder) AllowSocksTarget(target string) {
+	f.forwardMu.Lock()
+	defer f.forwardMu.Unlock()
+	if f.socksTargets == nil {
+		f.socksTargets = make(map[string]bool)
+	}
+	f.socksTargets[normalizeSocksTarget(target)] = true
+}
+
+// DisallowSocksTarget removes a previously registered target.
+func (f *Forwarder) DisallowSocksTarget(target string) {
+	f.forwardMu.Lock()
+	defer f.forwardMu.Unlock()
+	delete(f.socksTargets, normalizeSocksTarget(target))
+}
+
+// ClearSocksTargets forgets every registered target.
+func (f *Forwarder) ClearSocksTargets() {
+	f.forwardMu.Lock()
+	defer f.forwardMu.Unlock()
+	f.socksTargets = make(map[string]bool)
+}
+
+// socksTargetAllowed is the proxy-side allowlist check installed on every
+// proxy this forwarder spawns.
+func (f *Forwarder) socksTargetAllowed(target string) bool {
+	f.forwardMu.RLock()
+	defer f.forwardMu.RUnlock()
+	return f.socksTargets[normalizeSocksTarget(target)]
+}
+
+// normalizeSocksTarget canonicalizes a "host:port" target for comparison:
+// trimmed, lowercased, IPv6 host without brackets (the joined form keeps the
+// brackets, matching net.JoinHostPort).
+func normalizeSocksTarget(target string) string {
+	target = strings.TrimSpace(strings.ToLower(target))
+	host, port, err := net.SplitHostPort(target)
+	if err != nil {
+		return target
+	}
+	return net.JoinHostPort(strings.Trim(host, "[]"), port)
 }
 
 func (p *socksProxy) stop() {
@@ -163,6 +218,13 @@ func (p *socksProxy) handle(parent context.Context, f *Forwarder, client net.Con
 	target, err := p.handshake(client)
 	if err != nil {
 		f.setLastErr(fmt.Errorf("socks5 handshake: %w", err))
+		return
+	}
+	// Second gate behind the app-side selector: only registered targets may
+	// leave through the tunnel, so a local caller cannot probe the tailnet.
+	if p.allowed != nil && !p.allowed(target) {
+		_ = writeSocksReply(client, socksRepNotAllowed)
+		f.setLastErr(fmt.Errorf("socks5 target %s not allowed", target))
 		return
 	}
 	ctx, cancel := context.WithTimeout(parent, defaultDialTimeout)

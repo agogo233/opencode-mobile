@@ -74,13 +74,19 @@ type Forwarder struct {
 	// mode, where the app's HTTP stack reaches any tailnet target without
 	// per-target forward plumbing. Guarded by forwardMu.
 	socks *socksProxy
+	// socksTargets is the direct-connect allowlist: only registered
+	// "host:port" targets may be dialed through the proxy, so the exposure
+	// matches the per-target relay mode. Guarded by forwardMu; it is config,
+	// not node state, so it survives proxy restarts and node closes.
+	socksTargets map[string]bool
 }
 
 // New returns an unconfigured forwarder.
 func New() *Forwarder {
 	return &Forwarder{
-		phase:    "new",
-		forwards: make(map[string]*forward),
+		phase:        "new",
+		forwards:     make(map[string]*forward),
+		socksTargets: make(map[string]bool),
 	}
 }
 
