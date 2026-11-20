@@ -8,7 +8,7 @@ import {
   type TailscalePhase,
   type TailscaleStatus,
 } from "../lib/tailscale"
-import { autoRetryAllowed, canStart, controlUrlGate } from "../lib/tailscale-policy"
+import { autoRetryAllowed, canStart, controlUrlGate, pollUntilConnected } from "../lib/tailscale-policy"
 import { isInsecureControlUrl } from "../lib/control-url"
 
 export interface TailscaleConfig {
@@ -68,6 +68,11 @@ interface TailscaleState {
   // targetUrl in the native allowlist. True when the target may be reached
   // through the embedded node.
   ensureDirectTarget: (targetUrl: string) => Promise<boolean>
+  // Observe the node until it reports connected (bounded wait). Never starts
+  // or stops anything — a failed control connection is not retried here, the
+  // caller decides what to do with the answer. False on timeout, error or a
+  // user-driven stop while waiting.
+  waitForConnected: (timeoutMs: number) => Promise<boolean>
   // Stop the active loopback forward, if any. Used when the app switches to a
   // connection that does not ride the embedded node.
   releaseForward: () => Promise<void>
@@ -199,6 +204,10 @@ async function ensureNodeConnected(): Promise<boolean> {
   if (!native) return false
   const { authKey, controlUrl } = useTailscale.getState()
   let status = await native.status().catch(() => null)
+  // Keep the store (and every banner/settings readout) on the native side's
+  // real phase — the cold-start window spends a while in "connecting" and the
+  // UI must not keep claiming "new" meanwhile.
+  if (status) useTailscale.setState(applyStatus(status))
   if (!status || status.phase !== "connected") {
     // An enrollment or connect attempt is already in flight; let it finish
     // (status polling drives the UI) instead of stacking another start.
@@ -211,6 +220,7 @@ async function ensureNodeConnected(): Promise<boolean> {
       return false
     }
     status = await native.status().catch(() => null)
+    if (status) useTailscale.setState(applyStatus(status))
     if (!status || status.phase !== "connected") {
       // Covers a failed connect as well as a keyless enrollment still inside
       // its approval window (which neither mode can serve yet anyway).
@@ -360,6 +370,19 @@ export const useTailscale = create<TailscaleState>((set) => ({
   ensureForward: (targetUrl) => enqueue(() => doEnsureForward(targetUrl)),
 
   ensureDirectTarget: (targetUrl) => enqueue(() => doEnsureDirectTarget(targetUrl)),
+
+  // Deliberately NOT on the serialized op chain: this only observes status,
+  // so chaining it would freeze user-initiated start/stop behind the whole
+  // bounded wait instead of letting them cut the wait short.
+  waitForConnected: (timeoutMs) => {
+    const native = tailscaleNative()
+    if (!native) return Promise.resolve(false)
+    return pollUntilConnected(() => native.status().catch(() => null), {
+      intervalMs: 1_500,
+      timeoutMs,
+      onStatus: (status) => useTailscale.setState(applyStatus(status)),
+    })
+  },
 
   releaseForward: () => enqueue(() => doReleaseForward()),
 }))

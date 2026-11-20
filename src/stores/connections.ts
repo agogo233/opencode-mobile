@@ -11,6 +11,7 @@ import { resolveBaseUrl as resolveClientBaseUrl, TailscaleUnavailableError } fro
 import { directTargetFromUrl } from "../lib/direct-target"
 import { tailscaleNative } from "../lib/tailscale"
 import { useTailscale } from "./tailscale"
+import { shouldAwaitNodeRetry } from "../lib/tailscale-policy"
 
 const CONNECTIONS_KEY = "opencode_connections"
 const PASSWORDS_PREFIX = "opencode_password_"
@@ -22,6 +23,14 @@ const MAX_RECENT_DIRS = 10
 // faster since a real server responds to /global/health in well under a
 // second; this does NOT affect the timeout used for real session traffic.
 const CONNECTION_TEST_TIMEOUT_MS = 12_000
+// Cold-start client builds race the node's first connect (keyless approval
+// can legitimately take a while). Bound how long a failed build waits for
+// the node before reporting the tunnel as unavailable. Aligned with the Go
+// side's enrollment connect window (enrollmentConnectTimeout) so a pending
+// keyless approval is not given up on early. Waiting is safe: it only
+// observes native status, and a user-driven start/stop interrupts it via the
+// reported phase.
+const NODE_CONNECT_WAIT_MS = 900_000
 
 // Cached auth so we can create directory-scoped clients without async SecureStore lookups
 interface ClientBase {
@@ -175,7 +184,7 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       // Tailscale" indicator; the client is built in the background once the
       // loopback forward is ready.
       if (active?.type === "tailscale") {
-        const buildTailscaleClient = async () => {
+        const buildTailscaleClient = async (allowNodeWait: boolean = true) => {
           try {
             // Auto-start needs the persisted identity; loadConfig may still
             // be in flight on cold start, so make sure it has run.
@@ -226,14 +235,37 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
               tailscaleConnecting: false,
             })
           } catch (error) {
-            if (get().activeConnection?.id === active.id) {
-              set({
-                client: null,
-                clientBase: null,
-                tailscaleConnecting: false,
-                error: error instanceof TailscaleUnavailableError ? error.message : "errors.loadConnections",
-              })
+            if (get().activeConnection?.id !== active.id) return
+            // A cold start races the node's first connect: the build fails
+            // while the node is still "connecting" (keyless approval, slow
+            // tailnet) and, without this wait, the client would stay null
+            // forever — nothing re-triggers loadConnections after it returns,
+            // so the home session list would never load until the next app
+            // launch. Wait for the node once, then rebuild. Everything else
+            // (user stop, node error, missing config) reports as before.
+            if (allowNodeWait && error instanceof TailscaleUnavailableError) {
+              const status = await tailscaleNative()?.status().catch(() => null)
+              if (shouldAwaitNodeRetry(status?.phase)) {
+                set({ tailscaleConnecting: true, error: null })
+                const connected = await useTailscale.getState().waitForConnected(NODE_CONNECT_WAIT_MS)
+                if (get().activeConnection?.id === active.id) {
+                  if (connected) return buildTailscaleClient(false)
+                  set({
+                    client: null,
+                    clientBase: null,
+                    tailscaleConnecting: false,
+                    error: error.message,
+                  })
+                }
+                return
+              }
             }
+            set({
+              client: null,
+              clientBase: null,
+              tailscaleConnecting: false,
+              error: error instanceof TailscaleUnavailableError ? error.message : "errors.loadConnections",
+            })
           }
         }
         set({
